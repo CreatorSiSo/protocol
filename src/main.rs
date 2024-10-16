@@ -1,52 +1,194 @@
 use std::{
+    collections::VecDeque,
     fmt::Debug,
     io::{stdin, Read},
-    ops::BitXor,
 };
 
-mod types;
-use types::*;
-
 fn main() {
-    let mut state = State::new();
+    let mut connection = Connection::default();
 
     let input = stdin().lock().bytes();
-    for maybe_byte in input {
-        let byte = Byte::from_u8(maybe_byte.unwrap());
-        println!("\n{0}", byte);
+    connection
+        .outgoing_data
+        .extend(input.flat_map(|maybe_byte| maybe_byte.ok()));
 
-        state.send(byte.upper_nibble());
-        state.send(byte.lower_nibble());
+    for i in 0..20 {
+        connection.poll();
     }
+
+    dbg!(String::from_utf8_lossy(&connection.incoming_data));
 }
 
-struct State {
-    clock: Byte,
-    output: Nibble,
+/// Start of frame
+const SOF: u8 = 0x66;
+
+/// End of frame
+const EOF: u8 = 0x77;
+
+/// Correct frame data
+const CFD: u8 = 0x88;
+
+/// Incorrect frame data
+const IFD: u8 = 0x99;
+
+const ESCAPE_CODES: [u8; 4] = [SOF, EOF, CFD, IFD];
+
+/// # Steps
+///
+/// 1. calculate checksums
+/// 2. add start of frame
+/// 3. escape and add values
+/// 4. add checksums
+/// 5. add end of frame
+///
+/// ## Structure of frame
+///
+/// - SOF
+/// - data
+/// - checksums
+/// - EOF
+///
+/// ## Calculating checksums
+///
+/// TODO
+///
+/// ## Encoding values equal to escape codes
+///
+/// These values are encoded by repeating the value once.
+///
+/// | Function             | Escape code | Escaped value |
+/// | -------------------- | ----------- | ------------- |
+/// | start of frame       | (SOF) 0x66  | 0x6666        |
+/// | end of frame         | (EOF) 0x77  | 0x7777        |
+/// | correct frame data   | (CDF) 0x88  | 0x8888        |
+/// | incorrect frame data | (IDF) 0x99  | 0x9999        |
+///
+fn encode_frame<const S: usize>(data: &[u8; S]) -> Box<[u8]> {
+    let sof_len = 1;
+    let eof_len = 1;
+    let checksum_len = 0;
+    let frame_len = sof_len + data.len() + checksum_len + eof_len;
+
+    let mut frame = Vec::with_capacity(frame_len);
+    frame.push(SOF);
+
+    for value in data {
+        if ESCAPE_CODES.contains(value) {
+            frame.push(*value);
+        }
+        frame.push(*value);
+    }
+
+    // TODO Encode chucksums
+
+    frame.push(EOF);
+
+    frame.into_boxed_slice()
 }
 
-impl State {
-    fn new() -> Self {
-        Self {
-            clock: Byte::from_u8(0),
-            output: Nibble::from_u8(0),
+/// TODO Maybe break this up?
+///
+/// 1. pull data out of frame
+/// 2. unescape values
+/// 3. calculate checksums for received data
+/// 4. compare checksums
+///
+fn decode_frame() {}
+
+enum IncomingStatus {
+    WaitingForStart,
+    Receiving,
+}
+
+#[derive(PartialEq)]
+enum OutgoingStatus {
+    Sending,
+    Finished,
+}
+
+#[derive(Default)]
+struct Connection {
+    incoming_data: Vec<u8>,
+    outgoing_data: VecDeque<u8>,
+
+    /// last nibble received
+    /// - upper nibble: unused
+    /// - lower nibble: data received
+    incoming: u8,
+    /// last nibble sent
+    /// - upper nibble: unused
+    /// - lower nibble: data sent
+    outgoing: u8,
+}
+
+impl Connection {
+    fn poll(&mut self) {
+        // TODO Synchronization
+
+        if let Some(byte) = self.outgoing_data.pop_front() {
+            println!("<- {:?}", byte);
+            self.send(byte);
+        }
+
+        let received = self.receive();
+        println!("-> {:?}\n", received);
+
+        if let Some(byte) = received {
+            self.incoming_data.push(byte);
         }
     }
 
-    fn send(&mut self, data: Nibble) {
-        self.output = data.bitxor(self.clock.lower_nibble());
-        self.clock = !self.clock;
+    fn receive(&mut self) -> Option<u8> {
+        // TODO read values from pins
+        // let pins = [false, false, false, false];
+        // pins.iter().map(|bit| if *bit { 0b1 } else { 0b0 });
+        let pins = 0b0000;
+
+        let previous = self.incoming & 0x0f;
+        let current = pins;
+
+        // update input if different
+        if previous == current {
+            return None;
+        }
+
+        // decode Manchester code
+        //
+        // | previous | current | byte |
+        // | -------- | ------- | ---- |
+        // | 0        | 0       | x    |
+        // | 0        | 1       | 1    |
+        // | 1        | 0       | 0    |
+        // | 1        | 1       | x    |
+        let byte = !previous & current;
+
+        return Some(byte);
+    }
+
+    fn send(&mut self, data: u8) {
+        println!("byte: {:08b}", data);
+
+        const MASK: u8 = 0x0f;
+        let manchester_coded_1 = data ^ MASK;
+        let manchester_coded_2 = data ^ !MASK;
+
+        self.outgoing = manchester_coded_1 >> 4;
         println!("{:?}", &self);
-        self.output = data.bitxor(self.clock.lower_nibble());
-        self.clock = !self.clock;
+        self.outgoing = manchester_coded_2 >> 4;
+        println!("{:?}", &self);
+
+        // TODO Delay
+
+        self.outgoing = manchester_coded_1 & 0x0f;
+        println!("{:?}", &self);
+        self.outgoing = manchester_coded_2 & 0x0f;
         println!("{:?}", &self);
     }
 }
 
-impl Debug for State {
+impl Debug for Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} -> ", self.clock.lower_nibble())?;
-        write!(f, "{}", self.output)?;
+        write!(f, "{:04b}", self.outgoing)?;
         Ok(())
     }
 }
