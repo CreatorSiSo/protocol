@@ -1,22 +1,27 @@
 use std::{
     collections::VecDeque,
     fmt::Debug,
-    io::{stdin, Read},
+    io::{stdin, Read}, thread, time::Duration,
 };
 
-fn main() {
-    let mut connection = Connection::default();
+mod device;
+use device::{B15fDevice, Device};
+
+fn main() -> Result<(), &'static str> {
+    let mut connection = Connection::new(B15fDevice::new()?);
 
     let input = stdin().lock().bytes();
     connection
         .outgoing_data
         .extend(input.flat_map(|maybe_byte| maybe_byte.ok()));
 
-    for i in 0..20 {
+    for i in 0..100 {
+        thread::sleep(Duration::from_millis(100));
         connection.poll();
     }
 
     dbg!(String::from_utf8_lossy(&connection.incoming_data));
+    Ok(())
 }
 
 /// Start of frame
@@ -107,7 +112,7 @@ enum OutgoingStatus {
 }
 
 #[derive(Default)]
-struct Connection {
+struct Connection<D: Device> {
     incoming_data: Vec<u8>,
     outgoing_data: VecDeque<u8>,
 
@@ -119,9 +124,21 @@ struct Connection {
     /// - upper nibble: unused
     /// - lower nibble: data sent
     outgoing: u8,
+
+    device: D,
 }
 
-impl Connection {
+impl<D: Device> Connection<D> {
+    fn new(device: D) -> Self {
+        Self {
+            incoming_data: Vec::new(),
+            outgoing_data: VecDeque::new(),
+            incoming: 0,
+            outgoing: 0,
+            device
+        }
+    }
+
     fn poll(&mut self) {
         // TODO Synchronization
 
@@ -139,13 +156,8 @@ impl Connection {
     }
 
     fn receive(&mut self) -> Option<u8> {
-        // TODO read values from pins
-        // let pins = [false, false, false, false];
-        // pins.iter().map(|bit| if *bit { 0b1 } else { 0b0 });
-        let pins = 0b0000;
-
         let previous = self.incoming & 0x0f;
-        let current = pins;
+        let current = self.device.read();
 
         // update input if different
         if previous == current {
@@ -172,21 +184,19 @@ impl Connection {
         let manchester_coded_1 = data ^ MASK;
         let manchester_coded_2 = data ^ !MASK;
 
-        self.outgoing = manchester_coded_1 >> 4;
+        self.device.send(manchester_coded_1 >> 4);
         println!("{:?}", &self);
-        self.outgoing = manchester_coded_2 >> 4;
+        self.device.send(manchester_coded_2 >> 4);
         println!("{:?}", &self);
 
-        // TODO Delay
-
-        self.outgoing = manchester_coded_1 & 0x0f;
+        self.device.send(manchester_coded_1 & 0x0f);
         println!("{:?}", &self);
-        self.outgoing = manchester_coded_2 & 0x0f;
+        self.device.send(manchester_coded_2 & 0x0f);
         println!("{:?}", &self);
     }
 }
 
-impl Debug for Connection {
+impl<D: Device> Debug for Connection<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:04b}", self.outgoing)?;
         Ok(())
