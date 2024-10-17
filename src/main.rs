@@ -6,17 +6,17 @@ use std::{
 };
 
 mod device;
-use device::{Device, FileDevice};
+use device::{B15fDevice, Device, FileDevice};
 use escape::{EscapeCode, EscapedBytes};
 
 mod escape;
 
 fn main() -> Result<(), &'static str> {
     let stdin = stdin().lock().bytes();
-    let mut connection = Connection::new(FileDevice::new(), stdin);
+    let mut connection = Connection::new(B15fDevice::new()?, stdin);
 
     for _ in 0..100 {
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(10));
         connection.poll();
     }
 
@@ -93,20 +93,10 @@ fn encode_frame(data: &mut EscapedBytes<impl Read>) -> Frame {
 ///
 fn decode_frame() {}
 
-enum IncomingStatus {
-    WaitingForStart,
-    Receiving,
-}
-
-#[derive(PartialEq)]
-enum OutgoingStatus {
-    Sending,
-    Finished,
-}
-
 struct Connection<D: Device, R: Read> {
     data: EscapedBytes<R>,
     next_frame: Frame,
+    // Index of nibble to send
     sending_index: usize,
 
     received: Vec<u8>,
@@ -141,16 +131,23 @@ impl<D: Device, R: Read> Connection<D, R> {
     }
 
     fn poll(&mut self) {
-        if self.sending_index == 0 || self.sending_index >= FRAME_LEN {
+        if self.sending_index == 0 || self.sending_index >= (FRAME_LEN * 2) {
             self.next_frame = encode_frame(&mut self.data);
             self.sending_index = 0;
+            println!("{:?}", self.next_frame);
         }
 
-        self.send(self.next_frame[self.sending_index]);
+        let byte = self.next_frame[self.sending_index / 2];
+        // println!("byte: {:08b}", byte);
+        if self.sending_index % 2 == 0 {
+            self.device.send(byte >> 4);
+        } else {
+            self.device.send(byte & 0x0f)
+        };
         self.sending_index += 1;
 
         let received = self.receive();
-        println!("-> {:?}", received);
+        // println!("-> {:?}", received);
 
         if let Some(byte) = received {
             self.received.push(byte);
@@ -177,13 +174,6 @@ impl<D: Device, R: Read> Connection<D, R> {
         let byte = !previous & current;
 
         return Some(byte);
-    }
-
-    fn send(&mut self, data: u8) {
-        println!("byte: {:08b}", data);
-
-        self.device.send(data >> 4);
-        self.device.send(data & 0x0f);
     }
 }
 
