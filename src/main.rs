@@ -94,6 +94,7 @@ struct Connection<D: Device, R: Read> {
     o_stream: OutputStream,
     data: EscapedBytes<R>,
     device: D,
+    debug_lines: [String; 4],
 }
 
 impl<D: Device, R: Read> Connection<D, R> {
@@ -104,22 +105,26 @@ impl<D: Device, R: Read> Connection<D, R> {
             i_stream: InputStream::new(),
             data,
             device,
+            debug_lines: [const { String::new() }; 4],
         }
     }
 
     fn poll(&mut self) {
         if let Some(nibble_out) = self.o_stream.pull() {
-            self.next_frame = encode_frame(&mut self.data);
-            self.sending_index = 0;
-            println!("{:?}", self.next_frame);
-        }
-
-        let byte = self.next_frame[self.sending_index / 2];
-        // println!("byte: {:08b}", byte);
-        if self.sending_index % 2 == 0 {
+            for i in 0..4 {
+                let block = if (nibble_out << i) & 0b1000 == 0b1000 {
+                    "◻️"
+                } else {
+                    "◼"
+                };
+                self.debug_lines[i].push_str(block);
+            }
             self.device.send(nibble_out);
         } else {
-            self.device.send(byte & 0x0f)
+            for line in &mut self.debug_lines {
+                eprintln!("{}", line);
+                line.clear();
+            }
             self.o_stream = OutputStream::new(encode_frame(&mut self.data));
         };
 
@@ -168,7 +173,7 @@ struct OutputStream {
 
 impl OutputStream {
     fn new(frame: Frame) -> Self {
-        println!("{:?}", frame);
+        eprintln!("{:?}", frame);
         Self { frame, index: 0 }
     }
 
