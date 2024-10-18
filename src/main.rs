@@ -1,9 +1,5 @@
-use std::{
-    fmt::Debug,
-    io::{stdin, Bytes, Read},
-    thread,
-    time::Duration,
-};
+use std::io::{stdin, stdout, Bytes, Read, Write};
+use std::{thread, time::Duration};
 
 mod device;
 use device::{B15fDevice, Device, FileDevice};
@@ -13,14 +9,14 @@ mod escape;
 
 fn main() -> Result<(), &'static str> {
     let stdin = stdin().lock().bytes();
-    let mut connection = Connection::new(B15fDevice::new()?, stdin);
+    let mut connection = Connection::new(FileDevice::new(), stdin);
 
-    for _ in 0..100 {
-        thread::sleep(Duration::from_millis(10));
+    for _ in 0..500 {
+        thread::sleep(Duration::from_millis(1));
         connection.poll();
     }
 
-    dbg!(String::from_utf8_lossy(&connection.received));
+    // dbg!(String::from_utf8_lossy(&connection.received));
     Ok(())
 }
 
@@ -84,54 +80,35 @@ fn encode_frame(data: &mut EscapedBytes<impl Read>) -> Frame {
     frame
 }
 
-/// TODO Maybe break this up?
-///
 /// 1. pull data out of frame
 /// 2. unescape values
 /// 3. calculate checksums for received data
 /// 4. compare checksums
 ///
-fn decode_frame() {}
+fn decode_frame(frame: &Frame) -> &[u8] {
+    frame
+}
 
 struct Connection<D: Device, R: Read> {
+    i_stream: InputStream,
+    o_stream: OutputStream,
     data: EscapedBytes<R>,
-    next_frame: Frame,
-    // Index of nibble to send
-    sending_index: usize,
-
-    received: Vec<u8>,
-    received_frame: Frame,
-
-    /// last nibble received
-    /// - upper nibble: unused
-    /// - lower nibble: data received
-    incoming: u8,
-    /// last nibble sent
-    /// - upper nibble: unused
-    /// - lower nibble: data sent
-    outgoing: u8,
-
     device: D,
 }
 
 impl<D: Device, R: Read> Connection<D, R> {
-    fn new(device: D, data: Bytes<R>) -> Self {
+    fn new(device: D, bytes: Bytes<R>) -> Self {
+        let mut data = EscapedBytes::new(bytes);
         Self {
-            data: EscapedBytes::new(data),
-            next_frame: [0; FRAME_LEN],
-            sending_index: 0,
-
-            received: Vec::new(),
-            received_frame: [0; FRAME_LEN],
-
-            incoming: 0,
-            outgoing: 0,
+            o_stream: OutputStream::new(encode_frame(&mut data)),
+            i_stream: InputStream::new(),
+            data,
             device,
         }
     }
 
     fn poll(&mut self) {
-        if self.sending_index == 0 || self.sending_index >= (FRAME_LEN * 2) {
+        if let Some(nibble_out) = self.o_stream.pull() {
             self.next_frame = encode_frame(&mut self.data);
             self.sending_index = 0;
             println!("{:?}", self.next_frame);
@@ -140,46 +117,75 @@ impl<D: Device, R: Read> Connection<D, R> {
         let byte = self.next_frame[self.sending_index / 2];
         // println!("byte: {:08b}", byte);
         if self.sending_index % 2 == 0 {
-            self.device.send(byte >> 4);
+            self.device.send(nibble_out);
         } else {
             self.device.send(byte & 0x0f)
+            self.o_stream = OutputStream::new(encode_frame(&mut self.data));
         };
-        self.sending_index += 1;
 
-        let received = self.receive();
+        let nibble_in = self.device.read();
         // println!("-> {:?}", received);
-
-        if let Some(byte) = received {
-            self.received.push(byte);
+        match self.i_stream.push(nibble_in) {
+            Input::Frame(frame) => stdout().lock().write_all(decode_frame(&frame)).unwrap(),
+            Input::Finished => todo!(),
+            Input::Receiving => (),
         }
-    }
-
-    fn receive(&mut self) -> Option<u8> {
-        let previous = self.incoming & 0x0f;
-        let current = self.device.read();
-
-        // update input if different
-        if previous == current {
-            return None;
-        }
-
-        // decode Manchester code
-        //
-        // | previous | current | byte |
-        // | -------- | ------- | ---- |
-        // | 0        | 0       | x    |
-        // | 0        | 1       | 1    |
-        // | 1        | 0       | 0    |
-        // | 1        | 1       | x    |
-        let byte = !previous & current;
-
-        return Some(byte);
     }
 }
 
-impl<D: Device, R: Read> Debug for Connection<D, R> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:04b}", self.outgoing)?;
-        Ok(())
+struct InputStream {
+    incoming: u16,
+    frame: Frame,
+    index: usize,
+}
+
+impl InputStream {
+    fn new() -> Self {
+        Self {
+            incoming: 0x0000,
+            frame: [0; FRAME_LEN],
+            index: 0,
+        }
+    }
+
+    fn push(&mut self, nibble: u8) -> Input {
+        Input::Receiving
+    }
+}
+
+enum Input {
+    Frame(Frame),
+    Receiving,
+    Finished,
+}
+
+struct OutputStream {
+    /// Data to send
+    frame: Frame,
+    /// Index of the nibble to send
+    index: usize,
+}
+
+impl OutputStream {
+    fn new(frame: Frame) -> Self {
+        println!("{:?}", frame);
+        Self { frame, index: 0 }
+    }
+
+    /// returns the next nibble to send
+    fn pull(&mut self) -> Option<u8> {
+        if self.index >= (self.frame.len() * 2) {
+            return None;
+        }
+
+        let mut byte = self.frame[self.index / 2];
+        if self.index % 2 == 0 {
+            byte >>= 4;
+        } else {
+            byte &= 0x0f;
+        };
+        self.index += 1;
+
+        Some(byte)
     }
 }
