@@ -1,4 +1,4 @@
-use std::io::{Bytes, Error, Read};
+use std::io;
 
 #[repr(u8)]
 pub enum EscapeCode {
@@ -34,15 +34,15 @@ impl EscapeCode {
     }
 }
 
-pub struct EscapedBytes<R: Read> {
-    bytes: Bytes<R>,
+pub struct EscapedBytes<I: Iterator<Item = io::Result<u8>>> {
+    bytes: I,
     /// Second half of an escaped value
     escape: Option<u8>,
     done: bool,
 }
 
-impl<R: Read> EscapedBytes<R> {
-    pub fn new(bytes: Bytes<R>) -> Self {
+impl<I: Iterator<Item = io::Result<u8>>> EscapedBytes<I> {
+    pub fn new(bytes: I) -> Self {
         Self {
             bytes,
             escape: None,
@@ -55,8 +55,8 @@ impl<R: Read> EscapedBytes<R> {
     }
 }
 
-impl<R: Read> Iterator for EscapedBytes<R> {
-    type Item = Result<u8, Error>;
+impl<I: Iterator<Item = io::Result<u8>>> Iterator for EscapedBytes<I> {
+    type Item = Result<u8, io::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(byte) = self.escape.take() {

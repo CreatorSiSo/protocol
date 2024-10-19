@@ -1,15 +1,15 @@
-use std::io::{stdin, stdout, Bytes, Read, Write};
+use std::io::{stdin, stdout, Read, Write};
 use std::{thread, time::Duration};
 
 mod device;
-use device::{B15fDevice, Device, FileDevice};
+use device::{DebugDevice, Device};
 use escape::{EscapeCode, EscapedBytes};
 
 mod escape;
 
 fn main() -> Result<(), &'static str> {
     let stdin = stdin().lock().bytes();
-    let mut connection = Connection::new(FileDevice::new(), stdin);
+    let mut connection = Connection::new(DebugDevice::new(), stdin);
 
     while connection.poll() {
         thread::sleep(Duration::from_millis(1));
@@ -59,7 +59,7 @@ type Frame = [u8; FRAME_LEN];
 /// 0x56      0x9a 0x56
 /// 0x56      0x65
 ///
-fn encode_frame(data: &mut EscapedBytes<impl Read>) -> Frame {
+fn encode_frame(data: &mut impl Iterator<Item = std::io::Result<u8>>) -> Frame {
     let mut frame = [0; FRAME_LEN];
     frame[0] = EscapeCode::StartOfFrame as u8;
 
@@ -88,17 +88,17 @@ fn decode_frame(frame: &Frame) -> &[u8] {
     frame
 }
 
-struct Connection<D: Device, R: Read> {
+struct Connection<D: Device, I: Iterator<Item = std::io::Result<u8>>> {
     i_stream: InputStream,
     o_stream: OutputStream,
-    data: EscapedBytes<R>,
+    data: EscapedBytes<I>,
     done_receiving: bool,
     device: D,
     debug_lines: [String; 4],
 }
 
-impl<D: Device, R: Read> Connection<D, R> {
-    fn new(device: D, bytes: Bytes<R>) -> Self {
+impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
+    fn new(device: D, bytes: I) -> Self {
         let mut data = EscapedBytes::new(bytes);
         Self {
             o_stream: OutputStream::new(encode_frame(&mut data)),
@@ -130,7 +130,7 @@ impl<D: Device, R: Read> Connection<D, R> {
             Command::Received(frame) => stdout().lock().write_all(decode_frame(&frame)).unwrap(),
             Command::SendNextFrame => {
                 for line in &mut self.debug_lines {
-                    eprintln!("{}", line);
+                    eprintln!("{} {}", self.device.name(), line);
                     line.clear();
                 }
                 self.o_stream = OutputStream::new(encode_frame(&mut self.data));
@@ -139,6 +139,8 @@ impl<D: Device, R: Read> Connection<D, R> {
             Command::StopReceivingData => self.done_receiving = true,
             Command::None => (),
         };
+
+        self.device.debug_poll();
 
         !(self.data.is_done() && self.done_receiving)
     }
