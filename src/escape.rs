@@ -2,35 +2,43 @@ use std::io::{Bytes, Error, Read};
 
 #[repr(u8)]
 pub enum EscapeCode {
-    /// Start of frame
-    SOF = 0x12,
-    /// End of frame
-    EOF = 0x23,
-    /// Correct frame data
-    CFD = 0x34,
-    /// Incorrect frame data
-    IFD = 0x45,
-    // Negate previous nibble
-    NPN = 0x56,
-    // Done sending
-    DS = 0x67,
+    /// SOF
+    StartOfFrame = 0x12,
+    /// EOF
+    EndOfFrame = 0x23,
+    /// CFD
+    CorrectFrameData = 0x34,
+    /// IFD
+    IncorrectFrameData = 0x45,
+    // NF
+    NegateFollowing = 0x56,
+    // FS
+    FinishedSending = 0x67,
 }
 
 impl EscapeCode {
     const VALUES: [u8; 6] = [
-        Self::SOF as u8,
-        Self::EOF as u8,
-        Self::CFD as u8,
-        Self::IFD as u8,
-        Self::NPN as u8,
-        Self::DS as u8,
+        Self::StartOfFrame as u8,
+        Self::EndOfFrame as u8,
+        Self::CorrectFrameData as u8,
+        Self::IncorrectFrameData as u8,
+        Self::NegateFollowing as u8,
+        Self::FinishedSending as u8,
     ];
+
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        Self::VALUES.contains(&byte).then_some(
+            /* SAFETY: byte is a valid escape code */
+            unsafe { std::mem::transmute(byte) },
+        )
+    }
 }
 
 pub struct EscapedBytes<R: Read> {
     bytes: Bytes<R>,
     /// Second half of an escaped value
     escape: Option<u8>,
+    done: bool,
 }
 
 impl<R: Read> EscapedBytes<R> {
@@ -38,7 +46,12 @@ impl<R: Read> EscapedBytes<R> {
         Self {
             bytes,
             escape: None,
+            done: false,
         }
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.done
     }
 }
 
@@ -50,13 +63,15 @@ impl<R: Read> Iterator for EscapedBytes<R> {
             return Some(Ok(byte));
         }
 
-        self.bytes.next().inspect(|maybe_byte| {
+        let result = self.bytes.next().inspect(|maybe_byte| {
             if let Ok(byte) = maybe_byte {
                 if EscapeCode::VALUES.contains(&byte) {
                     let swapped_nibbles = (byte << 4) | (byte >> 4);
                     self.escape = Some(swapped_nibbles);
                 }
             }
-        })
+        });
+        self.done = result.is_some();
+        result
     }
 }
