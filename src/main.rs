@@ -3,7 +3,7 @@ use std::{thread, time::Duration};
 
 mod device;
 use device::{DebugDevice, Device};
-use escape::{EscapeCode, EscapedBytes};
+use escape::{swap_nibbles, EscapeCode, Escaped};
 
 mod escape;
 
@@ -52,7 +52,7 @@ type Frame = [u8; FRAME_LEN];
 /// | end of frame           | (EOF) 0x23  | 0x23 0x32      |
 /// | correct frame data     | (CDF) 0x34  | 0x34 0x43      |
 /// | incorrect frame data   | (IDF) 0x45  | 0x45 0x54      |
-/// | negate following       | (NF) 0x56   | 0x56 0x65      |
+/// | buffer                 | (BU) 0x56   | 0x56 0x65      |
 /// | finished sending       | (FS)  0x67  | 0x67 0x76      |
 ///
 /// 0x56 0x65 0x9a 0x56
@@ -80,18 +80,17 @@ fn encode_frame(data: &mut impl Iterator<Item = std::io::Result<u8>>) -> Frame {
 }
 
 /// 1. pull data out of frame
-/// 2. unescape values
-/// 3. calculate checksums for received data
-/// 4. compare checksums
+/// 2. calculate checksums for received data
+/// 3. compare checksums
 ///
 fn decode_frame(frame: &Frame) -> &[u8] {
-    frame
+    &frame[1..(1 + FRAME_DATA_LEN)]
 }
 
 struct Connection<D: Device, I: Iterator<Item = std::io::Result<u8>>> {
     i_stream: InputStream,
     o_stream: OutputStream,
-    data: EscapedBytes<I>,
+    data: Escaped<I>,
     done_receiving: bool,
     device: D,
     debug_lines: [String; 4],
@@ -99,7 +98,7 @@ struct Connection<D: Device, I: Iterator<Item = std::io::Result<u8>>> {
 
 impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
     fn new(device: D, bytes: I) -> Self {
-        let mut data = EscapedBytes::new(bytes);
+        let mut data = Escaped::new(bytes);
         Self {
             o_stream: OutputStream::new(encode_frame(&mut data)),
             i_stream: InputStream::new(),
@@ -147,49 +146,92 @@ impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
 }
 
 struct InputStream {
-    incoming: u16,
+    // the last 4 nibbles that have been received
+    window: u16,
+    // how many nibbles have been pushed into the window
+    window_length: u8,
     frame: Frame,
-    index: usize,
+    // index of byte in the frame to write to next
+    frame_index: usize,
 }
 
 impl InputStream {
     fn new() -> Self {
         Self {
-            incoming: 0x0000,
+            window: 0x0000,
+            window_length: 0,
             frame: [0; FRAME_LEN],
-            index: 0,
+            frame_index: 0,
         }
     }
 
     fn push(&mut self, nibble: u8) -> Command {
-        // truncates the u16, so that only the least significant byte is left
-        let previous_byte = self.incoming as u8;
-
-        if (previous_byte & 0x0f) == (nibble & 0x0f) {
-            // Values on cable have not changed
+        // ensures that the unused nibble is 0
+        let nibble = nibble & 0x0f;
+        // truncates the u16, so that only the least significant nibble is left
+        let previous_nibble = (self.window as u8) & 0x0f;
+        // whether value on cable has changed
+        if previous_nibble == nibble {
             return Command::None;
         }
 
-        self.incoming <<= 4;
-        self.incoming |= (nibble & 0x0f) as u16;
-
-        let current_byte = self.incoming as u8;
-        match EscapeCode::from_byte(current_byte) {
-            Some(EscapeCode::StartOfFrame) if self.index != 0 => Command::ResendLastFrame,
-            Some(EscapeCode::EndOfFrame) if self.index != (self.frame.len() - 1) => {
-                Command::ResendLastFrame
-            }
-            Some(EscapeCode::NegateFollowing) => todo!(),
-            Some(EscapeCode::CorrectFrameData) => Command::SendNextFrame,
-            Some(EscapeCode::IncorrectFrameData) => Command::ResendLastFrame,
-            Some(EscapeCode::FinishedSending) => Command::StopReceivingData,
-            _ => Command::None,
+        // push received nibble
+        self.window <<= 4;
+        self.window |= nibble as u16;
+        self.window_length += 1;
+        // not enough data has been pushed into the window
+        if self.window_length < 4 {
+            return Command::None;
         }
 
-        // TODO Push received data
+        let higher_byte = (self.window >> 4) as u8;
+        let lower_byte = self.window as u8;
+
+        // detect escape codes and shrink the window,
+        // so that the data is not decoded again in the next iteration
+        let command = match EscapeCode::from_byte(higher_byte) {
+            None => {
+                self.window_length = 2;
+                Command::None
+            }
+            Some(_) if higher_byte == swap_nibbles(lower_byte) => {
+                self.window_length = 0;
+                Command::None
+            }
+            Some(escape_code) => {
+                self.window_length = 2;
+
+                match escape_code {
+                    EscapeCode::StartOfFrame if self.frame_index != 0 => Command::ResendLastFrame,
+                    EscapeCode::EndOfFrame if self.frame_index != (self.frame.len() - 1) => {
+                        Command::ResendLastFrame
+                    }
+                    EscapeCode::StartOfFrame => Command::None,
+                    EscapeCode::EndOfFrame => {
+                        self.frame[FRAME_LEN - 1] = EscapeCode::EndOfFrame as u8;
+                        self.frame_index = 0;
+                        Command::Received(self.frame)
+                    }
+                    EscapeCode::Buffer => todo!(),
+                    EscapeCode::CorrectFrameData => Command::SendNextFrame,
+                    EscapeCode::IncorrectFrameData => Command::ResendLastFrame,
+                    EscapeCode::FinishedSending => Command::StopReceivingData,
+                }
+            }
+        };
+
+        // received part of a frame not an inserted escape code
+        if command == Command::None {
+            eprintln!("{:?}", self.frame);
+            self.frame[self.frame_index] = higher_byte;
+            self.frame_index += 1;
+        }
+
+        command
     }
 }
 
+#[derive(PartialEq, Eq)]
 enum Command {
     Received(Frame),
     SendNextFrame,

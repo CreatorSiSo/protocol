@@ -10,8 +10,8 @@ pub enum EscapeCode {
     CorrectFrameData = 0x34,
     /// IFD
     IncorrectFrameData = 0x45,
-    // NF
-    NegateFollowing = 0x56,
+    // BU
+    Buffer = 0x56,
     // FS
     FinishedSending = 0x67,
 }
@@ -22,7 +22,7 @@ impl EscapeCode {
         Self::EndOfFrame as u8,
         Self::CorrectFrameData as u8,
         Self::IncorrectFrameData as u8,
-        Self::NegateFollowing as u8,
+        Self::Buffer as u8,
         Self::FinishedSending as u8,
     ];
 
@@ -34,14 +34,14 @@ impl EscapeCode {
     }
 }
 
-pub struct EscapedBytes<I: Iterator<Item = io::Result<u8>>> {
+pub struct Escaped<I: Iterator<Item = io::Result<u8>>> {
     bytes: I,
     /// Second half of an escaped value
     escape: Option<u8>,
     done: bool,
 }
 
-impl<I: Iterator<Item = io::Result<u8>>> EscapedBytes<I> {
+impl<I: Iterator<Item = io::Result<u8>>> Escaped<I> {
     pub fn new(bytes: I) -> Self {
         Self {
             bytes,
@@ -55,7 +55,7 @@ impl<I: Iterator<Item = io::Result<u8>>> EscapedBytes<I> {
     }
 }
 
-impl<I: Iterator<Item = io::Result<u8>>> Iterator for EscapedBytes<I> {
+impl<I: Iterator<Item = io::Result<u8>>> Iterator for Escaped<I> {
     type Item = Result<u8, io::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -66,12 +66,15 @@ impl<I: Iterator<Item = io::Result<u8>>> Iterator for EscapedBytes<I> {
         let result = self.bytes.next().inspect(|maybe_byte| {
             if let Ok(byte) = maybe_byte {
                 if EscapeCode::VALUES.contains(&byte) {
-                    let swapped_nibbles = (byte << 4) | (byte >> 4);
-                    self.escape = Some(swapped_nibbles);
+                    self.escape = Some(swap_nibbles(*byte));
                 }
             }
         });
         self.done = result.is_some();
         result
     }
+}
+
+pub fn swap_nibbles(byte: u8) -> u8 {
+    (byte << 4) | (byte >> 4)
 }
