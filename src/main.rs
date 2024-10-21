@@ -51,12 +51,12 @@ pub type Frame = [u8; FRAME_LEN];
 ///
 /// | Function               | Escape code | Escaped value  |
 /// | ---------------------- | ----------- | -------------- |
-/// | start of frame         | (SOF) 0x12  | 0x12 0x21      |
-/// | end of frame           | (EOF) 0x23  | 0x23 0x32      |
-/// | correct frame data     | (CDF) 0x34  | 0x34 0x43      |
-/// | incorrect frame data   | (IDF) 0x45  | 0x45 0x54      |
-/// | buffer                 | (BU) 0x56   | 0x56 0x65      |
-/// | finished sending       | (FS)  0x67  | 0x67 0x76      |
+/// | start of frame         | (SOF) 0x12  | 0x12 0x12      |
+/// | end of frame           | (EOF) 0x23  | 0x23 0x23      |
+/// | correct frame data     | (CDF) 0x34  | 0x34 0x34      |
+/// | incorrect frame data   | (IDF) 0x45  | 0x45 0x45      |
+/// | buffer                 | (BU)  0x56  | 0x56 0x56      |
+/// | finished sending       | (FS)  0x67  | 0x67 0x67      |
 ///
 /// 0x56 0x65 0x9a 0x56
 /// 0x56      0x9a 0x56

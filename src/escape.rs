@@ -1,6 +1,6 @@
 use std::io;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum EscapeCode {
     /// SOF
@@ -66,16 +66,13 @@ impl<I: Iterator<Item = io::Result<u8>>> Iterator for Escaped<I> {
 
         let result = self.bytes.next().inspect(|maybe_byte| {
             if let Ok(byte) = maybe_byte {
+                // Repeat value of escape code to escape it
                 if EscapeCode::VALUES.contains(&byte) {
-                    self.escape = Some(swap_nibbles(*byte));
+                    self.escape = Some(*byte);
                 }
             }
         });
         self.done = result.is_some();
         result
     }
-}
-
-pub fn swap_nibbles(byte: u8) -> u8 {
-    (byte << 4) | (byte >> 4)
 }

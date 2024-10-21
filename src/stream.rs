@@ -1,5 +1,6 @@
-use crate::escape::{swap_nibbles, EscapeCode};
+use crate::escape::EscapeCode;
 use crate::{Frame, CHECKSUM_LEN, FRAME_DATA_LEN};
+use std::fmt::Debug;
 
 pub struct InputStream {
     state: InputState,
@@ -36,16 +37,16 @@ impl InputStream {
             return Command::None;
         }
 
-        match dbg!(self.window_decode_value()) {
+        match self.window_decode_value() {
             DecodedValue::EscapeCode(escape_code) => match escape_code {
                 EscapeCode::StartOfFrame => {
                     self.state = InputState::ReadingFrame;
-                    eprintln!("Changed to {:?}", self.state);
+                    eprintln!("State is now {:?}", self.state);
                 }
                 EscapeCode::CorrectFrameData => return Command::SendNextFrame,
                 EscapeCode::IncorrectFrameData => return Command::ResendLastFrame,
                 EscapeCode::FinishedSending => return Command::StopReceivingData,
-                EscapeCode::Buffer => unreachable!(),
+                EscapeCode::Buffer => eprintln!("Unexpected value"),
                 EscapeCode::EndOfFrame => eprintln!("Unexpected value"),
             },
             _ => (),
@@ -60,31 +61,31 @@ impl InputStream {
             return Command::None;
         }
 
-        match self.window_decode_value() {
+        let value = self.window_decode_value();
+        eprintln!("decoded: {:?}, index: {}", value, self.data_index);
+        match value {
             DecodedValue::Nibble(value) => {
-                eprintln!("_{:01x}", value);
+                // eprintln!("_{:01x}", value);
                 self.data[self.data_index / 2] |= value << ((1 + self.data_index) % 2) * 4;
                 self.data_index += 1;
                 Command::None
             }
             DecodedValue::Byte(value) => {
-                eprintln!("{:02x}", value);
+                // eprintln!("{:02x}", value);
                 self.data[self.data_index / 2] = value;
                 self.data_index += 2;
                 Command::None
             }
             DecodedValue::EscapeCode(escape_code) => {
-                eprintln!("{:?}", escape_code);
-
                 if !matches!(escape_code, EscapeCode::StartOfFrame) {
                     self.state = InputState::ReadingFrame;
                     eprintln!("State is now {:?}", self.state);
                 }
 
-                match escape_code {
+                match dbg!(&escape_code) {
                     EscapeCode::StartOfFrame if self.data_index != 0 => Command::ResendLastFrame,
                     EscapeCode::EndOfFrame => {
-                        if self.data_index / 2 == self.data.len() {
+                        if dbg!(dbg!(self.data_index / 2) == self.data.len()) {
                             self.data_index = 0;
                             Command::Received(self.data)
                         } else {
@@ -95,9 +96,7 @@ impl InputStream {
                     EscapeCode::CorrectFrameData => Command::SendNextFrame,
                     EscapeCode::IncorrectFrameData => Command::ResendLastFrame,
                     EscapeCode::FinishedSending => Command::StopReceivingData,
-
-                    EscapeCode::StartOfFrame => Command::None,
-                    EscapeCode::Buffer => unreachable!(),
+                    EscapeCode::StartOfFrame | EscapeCode::Buffer => Command::None,
                 }
             }
         }
@@ -110,12 +109,13 @@ impl InputStream {
         // detect escape codes and shrink the window,
         // so that the data is not decoded again in the next iteration
         match EscapeCode::from_byte(higher_byte) {
-            Some(_) if higher_byte == swap_nibbles(lower_byte) => {
+            Some(_) if higher_byte == lower_byte => {
                 self.window_length = 0;
                 let byte = self.window >> u8::BITS;
                 DecodedValue::Byte(byte as u8)
             }
             Some(escape_code) => {
+                eprintln!("window = {:04x}", self.window);
                 self.window_length = 2;
                 DecodedValue::EscapeCode(escape_code)
             }
@@ -139,8 +139,6 @@ impl InputStream {
             return false;
         }
 
-        eprintln!("{nibble:04b}");
-
         // push received nibble
         self.window <<= 4;
         self.window |= nibble as u16;
@@ -151,11 +149,26 @@ impl InputStream {
     }
 }
 
-#[derive(Debug)]
 enum DecodedValue {
     Nibble(u8),
     Byte(u8),
     EscapeCode(EscapeCode),
+}
+
+impl Debug for DecodedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nibble(arg0) => f
+                .debug_tuple("Nibble")
+                .field(&format!("{:01x}", arg0))
+                .finish(),
+            Self::Byte(arg0) => f
+                .debug_tuple("Byte")
+                .field(&format!("{:02x}", arg0))
+                .finish(),
+            Self::EscapeCode(arg0) => f.debug_tuple("EscapeCode").field(arg0).finish(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -164,7 +177,7 @@ enum InputState {
     ReadingFrame,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub enum Command {
     Received([u8; FRAME_DATA_LEN + CHECKSUM_LEN]),
     SendNextFrame,
@@ -172,6 +185,21 @@ pub enum Command {
     /// From now on the other side will only send escape codes
     StopReceivingData,
     None,
+}
+
+impl Debug for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Received(arg0) => f
+                .debug_tuple("Received")
+                .field(&bytes_to_debug_string(arg0))
+                .finish(),
+            Self::SendNextFrame => write!(f, "SendNextFrame"),
+            Self::ResendLastFrame => write!(f, "ResendLastFrame"),
+            Self::StopReceivingData => write!(f, "StopReceivingData"),
+            Self::None => write!(f, "None"),
+        }
+    }
 }
 
 #[test]
@@ -218,15 +246,19 @@ fn read_random() {
             .iter()
             .filter(|command| matches!(command, Command::Received(..)))
             .collect::<Vec<_>>(),
-        vec![&Command::Received(bytes)],
+        vec![&Command::Received([
+            0xa0, 0x8e, 0x4f, 0x24, 0x68, 0x53, 0x13, 0xcb, 0x17, 0xeb, 0xa1, 0xf2, 0x7e, 0xb3,
+            0xab, 0x07, 0x00, 0x4c, 0xac, 0x54, 0x34, 0x34, 0x5b, 0x72, 0x96, 0x09, 0xc0, 0xda,
+            0xbc, 0x17, 0xbc, 0xef, 0xa9, 0x7f, 0x65, 0x39, 0x58, 0x21, 0x72, 0xdd, 0x0b, 0xba,
+            0x9a, 0x75, 0xcd, 0x5f, 0xa2, 0x44, 0x43, 0x1b, 0xd2, 0x0d, 0x5b, 0x7c, 0x65, 0xbb,
+            0xc9, 0x4f, 0x78, 0xfe, 0x08, 0x6e, 0x23, 0x23,
+        ])],
     );
 }
 
 #[cfg(test)]
 fn use_input_stream(data: impl Iterator<Item = u8>) -> (Vec<Command>, InputStream) {
     use crate::{encode_frame, Escaped};
-    use std::iter;
-
     let mut iter = Escaped::new(data.map(|byte| Ok(byte)));
 
     let mut input_stream = InputStream::new();
@@ -234,22 +266,35 @@ fn use_input_stream(data: impl Iterator<Item = u8>) -> (Vec<Command>, InputStrea
 
     while !iter.is_done() {
         let frame = encode_frame(&mut iter);
-        eprintln!(
-            "{}",
-            frame
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .zip(iter::repeat(", "))
-                .fold(String::new(), |accum, (l, r)| accum + &l + r)
-        );
+        eprintln!("{}", bytes_to_debug_string(&frame));
 
+        // TODO Use output stream
         for byte in [&[0xf0; 5], frame.as_slice(), &[0xf0; 5]].concat() {
-            commands.push(input_stream.push(byte >> 4));
-            commands.push(input_stream.push(byte));
+            let higher_nibble = byte >> 4;
+            let lowher_nibble = byte & 0x0f;
+            commands.push(input_stream.push(higher_nibble));
+            if higher_nibble == lowher_nibble {
+                commands.push(input_stream.push(EscapeCode::Buffer as u8 >> 4));
+                commands.push(input_stream.push(EscapeCode::Buffer as u8));
+            }
+            commands.push(input_stream.push(lowher_nibble));
+            commands.push(input_stream.push(EscapeCode::Buffer as u8 >> 4));
+            commands.push(input_stream.push(EscapeCode::Buffer as u8));
         }
     }
 
     return (commands, input_stream);
+}
+
+fn bytes_to_debug_string(bytes: &[u8]) -> String {
+    let mut result = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .zip(std::iter::repeat(", "))
+        .fold(String::from("["), |accum, (l, r)| accum + &l + r);
+    result.pop();
+    result.pop();
+    result + "]"
 }
 
 pub struct OutputStream {
