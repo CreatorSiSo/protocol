@@ -1,5 +1,3 @@
-#![feature(iter_map_windows)]
-
 use std::io::{stdin, stdout, Read, Write};
 use std::{thread, time::Duration};
 
@@ -114,19 +112,18 @@ impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
 
     // Returns false when all data has been sent and received
     fn poll(&mut self) -> bool {
-        if let Some(nibble_out) = self.o_stream.pull() {
-            for i in 0..4 {
-                self.debug_lines[i].push_str(if (nibble_out << i) & 0b1000 == 0b1000 {
-                    "◻️"
-                } else {
-                    "◼"
-                });
-            }
-            self.device.send(nibble_out);
-        };
+        let nibble_out = self.o_stream.next();
+        for i in 0..4 {
+            self.debug_lines[i].push_str(if (nibble_out << i) & 0b1000 == 0b1000 {
+                "◻️"
+            } else {
+                "◼"
+            });
+        }
 
+        self.device.send(nibble_out);
         let nibble_in = self.device.read();
-        // println!("-> {:?}", received);
+
         match self.i_stream.push(nibble_in) {
             Command::Received(frame) => stdout().lock().write_all(decode_frame(&frame)).unwrap(),
             Command::SendNextFrame => {
@@ -134,9 +131,9 @@ impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
                     eprintln!("{} {}", self.device.name(), line);
                     line.clear();
                 }
-                self.o_stream.set_frame(encode_frame(&mut self.data));
+                self.o_stream.send_frame(encode_frame(&mut self.data));
             }
-            Command::ResendLastFrame => self.o_stream.reset(),
+            Command::ResendLastFrame => self.o_stream.resend_frame(),
             Command::StopReceivingData => self.done_receiving = true,
             Command::None => (),
         };

@@ -11,19 +11,22 @@ pub enum EscapeCode {
     CorrectFrameData = 0x34,
     /// IFD
     IncorrectFrameData = 0x45,
-    // BU
-    Buffer = 0x56,
+    // BU1
+    Buffer1 = 0x56,
+    // BU2
+    Buffer2 = 0x65,
     // FS
     FinishedSending = 0x67,
 }
 
 impl EscapeCode {
-    const VALUES: [u8; 6] = [
+    const VALUES: [u8; 7] = [
         Self::StartOfFrame as u8,
         Self::EndOfFrame as u8,
         Self::CorrectFrameData as u8,
         Self::IncorrectFrameData as u8,
-        Self::Buffer as u8,
+        Self::Buffer1 as u8,
+        Self::Buffer2 as u8,
         Self::FinishedSending as u8,
     ];
 

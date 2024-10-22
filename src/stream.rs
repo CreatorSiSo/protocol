@@ -46,7 +46,7 @@ impl InputStream {
                 EscapeCode::CorrectFrameData => return Command::SendNextFrame,
                 EscapeCode::IncorrectFrameData => return Command::ResendLastFrame,
                 EscapeCode::FinishedSending => return Command::StopReceivingData,
-                EscapeCode::Buffer => eprintln!("Unexpected value"),
+                EscapeCode::Buffer1 | EscapeCode::Buffer2 => eprintln!("Unexpected value"),
                 EscapeCode::EndOfFrame => eprintln!("Unexpected value"),
             },
             _ => (),
@@ -96,7 +96,9 @@ impl InputStream {
                     EscapeCode::CorrectFrameData => Command::SendNextFrame,
                     EscapeCode::IncorrectFrameData => Command::ResendLastFrame,
                     EscapeCode::FinishedSending => Command::StopReceivingData,
-                    EscapeCode::StartOfFrame | EscapeCode::Buffer => Command::None,
+                    EscapeCode::StartOfFrame | EscapeCode::Buffer1 | EscapeCode::Buffer2 => {
+                        Command::None
+                    }
                 }
             }
         }
@@ -275,12 +277,12 @@ fn use_input_stream(data: impl Iterator<Item = u8>) -> (Vec<Command>, InputStrea
             let lowher_nibble = byte & 0x0f;
             commands.push(input_stream.push(higher_nibble));
             if higher_nibble == lowher_nibble {
-                commands.push(input_stream.push(EscapeCode::Buffer as u8 >> 4));
-                commands.push(input_stream.push(EscapeCode::Buffer as u8));
+                commands.push(input_stream.push(EscapeCode::Buffer1 as u8 >> 4));
+                commands.push(input_stream.push(EscapeCode::Buffer1 as u8));
             }
             commands.push(input_stream.push(lowher_nibble));
-            commands.push(input_stream.push(EscapeCode::Buffer as u8 >> 4));
-            commands.push(input_stream.push(EscapeCode::Buffer as u8));
+            commands.push(input_stream.push(EscapeCode::Buffer1 as u8 >> 4));
+            commands.push(input_stream.push(EscapeCode::Buffer1 as u8));
         }
     }
 
@@ -308,7 +310,8 @@ pub struct OutputStream {
     /// Data to send
     frame: Frame,
     /// Index of the nibble to send
-    nibbles: Box<dyn Iterator<Item = u8>>,
+    index: usize,
+    window: Window<4>,
 }
 
 impl OutputStream {
@@ -316,45 +319,206 @@ impl OutputStream {
         Self {
             state: OutputState::WaitingForFrame,
             frame: [0; FRAME_LEN],
-            nibbles: Box::new(std::iter::repeat([0x00; 0x0f]).flatten()),
+            index: 0,
+            window: Window::new(),
         }
     }
 
+    pub fn send_frame(&mut self, frame: Frame) {
+        self.state = OutputState::WritingFrame;
+        self.frame = frame;
+        self.index = 0;
+    }
+
+    /// Resets the internal state, but keeps the frame data.
+    pub fn resend_frame(&mut self) {
+        self.state = OutputState::WaitingForFrame;
+        self.index = 0;
+    }
+
     /// returns the next nibble to send
-    pub fn pull(&mut self) -> Option<u8> {
-        match (&self.state, self.nibbles.next()) {
-            (OutputState::WaitingForFrame, next) => next,
-            (OutputState::WritingFrame, Some(nibble)) => Some(nibble),
-            (OutputState::WritingFrame, None) => {
-                self.state = OutputState::WaitingForFrame;
-                self.nibbles = Box::new(std::iter::repeat([0x00; 0x0f]).flatten());
-                self.nibbles.next()
+    pub fn next(&mut self) -> u8 {
+        match self.state {
+            OutputState::WaitingForFrame => self.waiting_for_frame(),
+            OutputState::WritingFrame => {
+                if let Some(nibble) = self.writing_frame() {
+                    nibble
+                } else {
+                    self.state = OutputState::WaitingForFrame;
+                    self.waiting_for_frame()
+                }
             }
         }
     }
 
-    pub fn set_frame(&mut self, frame: Frame) {
-        self.state = OutputState::WritingFrame;
-        self.frame = frame;
-        self.nibbles = Box::new(
-            self.frame
-                .into_iter()
-                .flat_map(|byte| [byte >> 4, byte & 0x0f])
-                .map_windows(|[prev, next]| {
-                    if prev == next {
-                        let escape = EscapeCode::Buffer as u8;
-                        [Some(*prev), Some(escape >> 4), Some(escape & 0x0f)]
-                    } else {
-                        [Some(*prev), None, None]
-                    }
-                })
-                .flatten()
-                .flatten(),
-        );
+    fn waiting_for_frame(&mut self) -> u8 {
+        let nibble = if self.index % 2 == 0 { 0x0f } else { 0x00 };
+        self.index += 1;
+        nibble
     }
 
-    /// Resets the internal state, but keeps the frame data.
-    pub fn reset(&mut self) {
-        self.state = OutputState::WaitingForFrame;
+    fn writing_frame(&mut self) -> Option<u8> {
+        if let Some(byte) = self.frame.get(self.index / 2) {
+            let nibble = if self.index % 2 == 0 {
+                byte >> 4
+            } else {
+                byte & 0x0f
+            };
+            self.window.push_back(nibble);
+        }
+
+        if self.window.len > 2 {
+            self.window.pop_front()
+        } else if self.window.len == 2 {
+            let higher = self.window.get(1).expect("upper nibble");
+            let lower = self.window.get(0).expect("lower nibble");
+            let escape_code = if higher == EscapeCode::Buffer1 as u8 >> 4 {
+                EscapeCode::Buffer2 as u8
+            } else {
+                EscapeCode::Buffer1 as u8 >> 4
+            };
+
+            if higher == lower {
+                self.window.pop_back();
+                self.window.push_back(escape_code >> 4);
+                self.window.push_back(escape_code & 0x0f);
+                self.window.push_back(lower);
+            }
+            self.window.pop_front()
+        } else {
+            None
+        }
     }
+}
+
+/// # Window
+///
+/// A vector-like data structure with a maximum length, that stores nibbles.
+///
+/// ## Layout
+///
+/// byte index:   <  0,   1,   2,   3    >
+/// nibble index: <  7 6, 5 4, 3 2, 1 0  >
+/// data:         [  x x, x x, x x, x x  ]
+///
+/// push(1): [   xx,  xx,  xx,   x1  ]
+/// push(2): [   xx,  xx,  xx,   12  ]
+/// push(3): [   xx,  xx,  x1,   23  ]
+/// push(4): [   xx,  xx,  12,   34  ]
+/// push(5): [   xx,  x1,  23,   45  ]
+///
+/// N is the underlying maximum size in bytes
+struct Window<const N: usize> {
+    // underlying bytes
+    data: [u8; N],
+    // length in nibbles
+    len: usize,
+}
+
+impl<const N: usize> Window<N> {
+    fn new() -> Self {
+        Self {
+            data: [0; N],
+            len: 0,
+        }
+    }
+
+    fn push_back(&mut self, nibble: u8) -> Option<u8> {
+        let prev = self.data;
+
+        // Shift every nibble 4 bits to the left
+        for (index, byte) in self.data.iter_mut().enumerate() {
+            *byte <<= 4;
+            *byte |= prev
+                .get(index + 1)
+                .map(|byte_to_right| byte_to_right >> 4)
+                .unwrap_or(nibble);
+        }
+
+        let filled = self.len / 2 == self.data.len();
+        if !filled {
+            self.len += 1;
+        }
+
+        filled.then_some(prev[0] >> 4)
+    }
+
+    fn pop_front(&mut self) -> Option<u8> {
+        let result = self.get(self.len - 1);
+        if self.len > 0 {
+            self.len -= 1;
+        }
+        result
+    }
+
+    fn pop_back(&mut self) -> Option<u8> {
+        let prev = self.data;
+
+        // Shift every nibble 4 bits to the right
+        for (index, byte) in self.data.iter_mut().enumerate() {
+            *byte >>= 4;
+            *byte |= index
+                .checked_sub(1)
+                .map(|index_to_left| prev[index_to_left] << 4)
+                .unwrap_or(0x00);
+        }
+
+        let not_empty = self.len > 0;
+        if not_empty {
+            self.len -= 1;
+        }
+
+        not_empty.then_some(prev[prev.len() - 1] & 0x0f)
+    }
+
+    fn get(&self, index: usize) -> Option<u8> {
+        if index >= self.len {
+            return None;
+        }
+
+        let byte_index = self.data.len() - 1 - index / 2;
+        let byte = self.data[byte_index];
+        let nibble = if index % 2 == 0 {
+            byte & 0x0f
+        } else {
+            byte >> 4
+        };
+        Some(nibble)
+    }
+}
+
+#[test]
+fn window() {
+    let mut window = Window::<2>::new();
+    assert_eq!(
+        [None, None, None, None, Some(0x01)],
+        [
+            window.push_back(0x01),
+            window.push_back(0x02),
+            window.push_back(0x03),
+            window.push_back(0x04),
+            window.push_back(0x05)
+        ]
+    );
+    assert_eq!([0x23, 0x45], window.data);
+    assert_eq!(
+        [Some(0x05), Some(0x04), Some(0x03), Some(0x02), None],
+        [
+            window.get(0),
+            window.get(1),
+            window.get(2),
+            window.get(3),
+            window.get(4)
+        ]
+    );
+    assert_eq!(
+        [Some(0x05), Some(0x04), Some(0x03), Some(0x02), None],
+        [
+            window.pop_back(),
+            window.pop_back(),
+            window.pop_back(),
+            window.pop_back(),
+            window.pop_back()
+        ]
+    );
 }
