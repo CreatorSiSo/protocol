@@ -1,3 +1,5 @@
+#![feature(iter_map_windows)]
+
 use std::io::{stdin, stdout, Read, Write};
 use std::{thread, time::Duration};
 
@@ -90,23 +92,22 @@ fn decode_frame(frame: &[u8; FRAME_DATA_LEN + CHECKSUM_LEN]) -> &[u8] {
 }
 
 struct Connection<D: Device, I: Iterator<Item = std::io::Result<u8>>> {
+    device: D,
     i_stream: InputStream,
     o_stream: OutputStream,
     data: Escaped<I>,
     done_receiving: bool,
-    device: D,
     debug_lines: [String; 4],
 }
 
 impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
     fn new(device: D, bytes: I) -> Self {
-        let mut data = Escaped::new(bytes);
         Self {
-            o_stream: OutputStream::new(encode_frame(&mut data)),
-            i_stream: InputStream::new(),
-            data,
-            done_receiving: false,
             device,
+            o_stream: OutputStream::new(),
+            i_stream: InputStream::new(),
+            data: Escaped::new(bytes),
+            done_receiving: false,
             debug_lines: [const { String::new() }; 4],
         }
     }
@@ -115,12 +116,11 @@ impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
     fn poll(&mut self) -> bool {
         if let Some(nibble_out) = self.o_stream.pull() {
             for i in 0..4 {
-                let block = if (nibble_out << i) & 0b1000 == 0b1000 {
+                self.debug_lines[i].push_str(if (nibble_out << i) & 0b1000 == 0b1000 {
                     "◻️"
                 } else {
                     "◼"
-                };
-                self.debug_lines[i].push_str(block);
+                });
             }
             self.device.send(nibble_out);
         };
@@ -134,7 +134,7 @@ impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
                     eprintln!("{} {}", self.device.name(), line);
                     line.clear();
                 }
-                self.o_stream = OutputStream::new(encode_frame(&mut self.data));
+                self.o_stream.set_frame(encode_frame(&mut self.data));
             }
             Command::ResendLastFrame => self.o_stream.reset(),
             Command::StopReceivingData => self.done_receiving = true,

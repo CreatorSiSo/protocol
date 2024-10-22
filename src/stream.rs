@@ -1,5 +1,5 @@
 use crate::escape::EscapeCode;
-use crate::{Frame, CHECKSUM_LEN, FRAME_DATA_LEN};
+use crate::{Frame, CHECKSUM_LEN, FRAME_DATA_LEN, FRAME_LEN};
 use std::fmt::Debug;
 
 pub struct InputStream {
@@ -261,6 +261,7 @@ fn use_input_stream(data: impl Iterator<Item = u8>) -> (Vec<Command>, InputStrea
     use crate::{encode_frame, Escaped};
     let mut iter = Escaped::new(data.map(|byte| Ok(byte)));
 
+    let mut output_stream = OutputStream::new();
     let mut input_stream = InputStream::new();
     let mut commands = Vec::new();
 
@@ -297,38 +298,63 @@ fn bytes_to_debug_string(bytes: &[u8]) -> String {
     result + "]"
 }
 
+enum OutputState {
+    WaitingForFrame,
+    WritingFrame,
+}
+
 pub struct OutputStream {
+    state: OutputState,
     /// Data to send
     frame: Frame,
     /// Index of the nibble to send
-    index: usize,
+    nibbles: Box<dyn Iterator<Item = u8>>,
 }
 
 impl OutputStream {
-    pub fn new(frame: Frame) -> Self {
-        eprintln!("{:?}", frame);
-        Self { frame, index: 0 }
+    pub fn new() -> Self {
+        Self {
+            state: OutputState::WaitingForFrame,
+            frame: [0; FRAME_LEN],
+            nibbles: Box::new(std::iter::repeat([0x00; 0x0f]).flatten()),
+        }
     }
 
     /// returns the next nibble to send
     pub fn pull(&mut self) -> Option<u8> {
-        if self.index >= (self.frame.len() * 2) {
-            return None;
+        match (&self.state, self.nibbles.next()) {
+            (OutputState::WaitingForFrame, next) => next,
+            (OutputState::WritingFrame, Some(nibble)) => Some(nibble),
+            (OutputState::WritingFrame, None) => {
+                self.state = OutputState::WaitingForFrame;
+                self.nibbles = Box::new(std::iter::repeat([0x00; 0x0f]).flatten());
+                self.nibbles.next()
+            }
         }
+    }
 
-        let mut byte = self.frame[self.index / 2];
-        if self.index % 2 == 0 {
-            byte >>= 4;
-        } else {
-            byte &= 0x0f;
-        };
-        self.index += 1;
-
-        Some(byte)
+    pub fn set_frame(&mut self, frame: Frame) {
+        self.state = OutputState::WritingFrame;
+        self.frame = frame;
+        self.nibbles = Box::new(
+            self.frame
+                .into_iter()
+                .flat_map(|byte| [byte >> 4, byte & 0x0f])
+                .map_windows(|[prev, next]| {
+                    if prev == next {
+                        let escape = EscapeCode::Buffer as u8;
+                        [Some(*prev), Some(escape >> 4), Some(escape & 0x0f)]
+                    } else {
+                        [Some(*prev), None, None]
+                    }
+                })
+                .flatten()
+                .flatten(),
+        );
     }
 
     /// Resets the internal state, but keeps the frame data.
     pub fn reset(&mut self) {
-        self.index = 0;
+        self.state = OutputState::WaitingForFrame;
     }
 }
