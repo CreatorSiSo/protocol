@@ -63,7 +63,7 @@ impl Device for DebugDevice {
     const NAME: &'static str = "Debug";
 
     fn send(&mut self, data: u8) {
-        eprintln!("{} {:04b}", self.name(), data);
+        // eprintln!("{} {:04b}", self.name(), data);
         self.other_side.device.incoming = data;
     }
 
@@ -72,7 +72,7 @@ impl Device for DebugDevice {
     }
 
     fn debug_poll(&mut self) {
-        self.other_side.poll();
+        self.other_side.poll(&mut Vec::new());
     }
 }
 
@@ -94,7 +94,7 @@ impl Device for MirrorDevice {
     const NAME: &'static str = "Mirror";
 
     fn send(&mut self, data: u8) {
-        eprintln!("{} {:04b}", self.name(), data);
+        // eprintln!("{} {:04b}", self.name(), data);
         self.outgoing = data;
     }
 

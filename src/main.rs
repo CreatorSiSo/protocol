@@ -1,8 +1,9 @@
+use std::fs;
 use std::io::{stdin, stdout, Read, Write};
 use std::{thread, time::Duration};
 
 mod device;
-use device::{DebugDevice, Device};
+use device::{B15fDevice, DebugDevice, Device};
 use escape::{EscapeCode, Escaped};
 
 mod escape;
@@ -11,14 +12,15 @@ mod stream;
 use stream::{Command, InputStream, OutputStream};
 
 fn main() -> Result<(), &'static str> {
-    let stdin = stdin().lock().bytes();
-    let mut connection = Connection::new(DebugDevice::new(), stdin);
+    // let stdin = stdin().lock().bytes();
+    let input = fs::read("./data/random-256.bin").unwrap();
 
-    while connection.poll() {
+    let mut connection = Connection::new(DebugDevice::new(), input.bytes());
+
+    while connection.poll(stdout().lock().by_ref()) {
         thread::sleep(Duration::from_millis(1));
     }
 
-    // dbg!(String::from_utf8_lossy(&connection.received));
     Ok(())
 }
 
@@ -102,8 +104,8 @@ impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
     fn new(device: D, bytes: I) -> Self {
         Self {
             device,
-            o_stream: OutputStream::new(),
             i_stream: InputStream::new(),
+            o_stream: OutputStream::new(),
             data: Escaped::new(bytes),
             done_receiving: false,
             debug_lines: [const { String::new() }; 4],
@@ -111,21 +113,10 @@ impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
     }
 
     // Returns false when all data has been sent and received
-    fn poll(&mut self) -> bool {
-        let nibble_out = self.o_stream.next();
-        for i in 0..4 {
-            self.debug_lines[i].push_str(if (nibble_out << i) & 0b1000 == 0b1000 {
-                "◻️"
-            } else {
-                "◼"
-            });
-        }
-
-        self.device.send(nibble_out);
+    fn poll(&mut self, output: &mut dyn Write) -> bool {
         let nibble_in = self.device.read();
-
         match self.i_stream.push(nibble_in) {
-            Command::Received(frame) => stdout().lock().write_all(decode_frame(&frame)).unwrap(),
+            Command::Received(frame) => output.write_all(decode_frame(&frame)).unwrap(),
             Command::SendNextFrame => {
                 for line in &mut self.debug_lines {
                     eprintln!("{} {}", self.device.name(), line);
@@ -137,6 +128,16 @@ impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
             Command::StopReceivingData => self.done_receiving = true,
             Command::None => (),
         };
+
+        let nibble_out = self.o_stream.next();
+        self.device.send(nibble_out);
+        for i in 0..4 {
+            self.debug_lines[i].push_str(if (nibble_out << i) & 0b1000 == 0b1000 {
+                "◻️"
+            } else {
+                "◼"
+            });
+        }
 
         self.device.debug_poll();
 

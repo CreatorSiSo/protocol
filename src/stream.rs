@@ -5,43 +5,81 @@ use std::fmt::Debug;
 pub struct InputStream {
     state: InputState,
     // the last 4 nibbles that have been received
-    window: u16,
-    // how many nibbles have been pushed into the window
-    window_length: u8,
+    window: Window<2>,
     data: [u8; FRAME_DATA_LEN + CHECKSUM_LEN],
     // index of nibble in the frame to write to next
     data_index: usize,
+    clock: usize,
 }
 
 impl InputStream {
     pub fn new() -> Self {
         Self {
-            state: InputState::WaitingForFrame,
-            window: 0x0000,
-            window_length: 0,
+            state: InputState::WaitingForConnection,
+            window: Window::new(),
             data: [0; FRAME_DATA_LEN + CHECKSUM_LEN],
             data_index: 0,
+            clock: 0,
         }
     }
 
     pub fn push(&mut self, nibble: u8) -> Command {
-        match self.state {
-            InputState::WaitingForFrame => self.waiting_for_frame(nibble),
-            InputState::ReadingFrame => self.reading_frame(nibble),
-        }
-    }
-
-    fn waiting_for_frame(&mut self, nibble: u8) -> Command {
-        let should_read_window = self.window_push(nibble);
-        if !should_read_window {
+        // whether the probed value on the cable has changed
+        if self.window.get(0) == Some(nibble) {
             return Command::None;
         }
 
+        self.window.push_back(nibble);
+
+        // whether enough data has been pushed into the window
+        if self.window.len < 4 {
+            return Command::None;
+        }
+
+        match self.state {
+            InputState::WaitingForConnection => self.waiting_for_connection(),
+            InputState::WaitingForFrame => self.waiting_for_frame(),
+            InputState::ReadingFrame => self.reading_frame(),
+        }
+    }
+
+    fn state_transition(&mut self, next: InputState) {
+        use InputState::*;
+
+        dbg!((&self.state, &next));
+
+        match (&self.state, &next) {
+            (WaitingForConnection, WaitingForFrame) => {
+                eprintln!("=== Input: Established connection ===")
+            }
+            (ReadingFrame, WaitingForFrame) => eprintln!("=== Input: Waiting for frame ==="),
+            (WaitingForFrame, ReadingFrame) => eprintln!("=== Input: Reading frame ==="),
+            (ReadingFrame, ReadingFrame)
+            | (WaitingForConnection, WaitingForConnection)
+            | (WaitingForConnection, ReadingFrame)
+            | (WaitingForFrame, WaitingForConnection)
+            | (WaitingForFrame, WaitingForFrame)
+            | (ReadingFrame, WaitingForConnection) => unreachable!(),
+        }
+
+        self.state = next;
+    }
+
+    fn waiting_for_connection(&mut self) -> Command {
+        self.clock += 1;
+        if self.clock > 10 {
+            self.state_transition(InputState::WaitingForFrame);
+            Command::SendNextFrame
+        } else {
+            Command::None
+        }
+    }
+
+    fn waiting_for_frame(&mut self) -> Command {
         match self.window_decode_value() {
             DecodedValue::EscapeCode(escape_code) => match escape_code {
                 EscapeCode::StartOfFrame => {
-                    self.state = InputState::ReadingFrame;
-                    eprintln!("State is now {:?}", self.state);
+                    self.state_transition(InputState::ReadingFrame);
                 }
                 EscapeCode::CorrectFrameData => return Command::SendNextFrame,
                 EscapeCode::IncorrectFrameData => return Command::ResendLastFrame,
@@ -55,34 +93,26 @@ impl InputStream {
         Command::None
     }
 
-    fn reading_frame(&mut self, nibble: u8) -> Command {
-        let changed = self.window_push(nibble);
-        if !changed {
-            return Command::None;
-        }
-
+    fn reading_frame(&mut self) -> Command {
         let value = self.window_decode_value();
         eprintln!("decoded: {:?}, index: {}", value, self.data_index);
         match value {
             DecodedValue::Nibble(value) => {
-                // eprintln!("_{:01x}", value);
                 self.data[self.data_index / 2] |= value << ((1 + self.data_index) % 2) * 4;
                 self.data_index += 1;
                 Command::None
             }
             DecodedValue::Byte(value) => {
-                // eprintln!("{:02x}", value);
                 self.data[self.data_index / 2] = value;
                 self.data_index += 2;
                 Command::None
             }
             DecodedValue::EscapeCode(escape_code) => {
                 if !matches!(escape_code, EscapeCode::StartOfFrame) {
-                    self.state = InputState::ReadingFrame;
-                    eprintln!("State is now {:?}", self.state);
+                    self.state_transition(InputState::ReadingFrame);
                 }
 
-                match dbg!(&escape_code) {
+                match &escape_code {
                     EscapeCode::StartOfFrame if self.data_index != 0 => Command::ResendLastFrame,
                     EscapeCode::EndOfFrame => {
                         if dbg!(dbg!(self.data_index / 2) == self.data.len()) {
@@ -105,49 +135,22 @@ impl InputStream {
     }
 
     fn window_decode_value(&mut self) -> DecodedValue {
-        let higher_byte = (self.window >> u8::BITS) as u8;
-        let lower_byte = self.window as u8;
+        let higher_byte = self.window.data[0];
+        let lower_byte = self.window.data[1];
 
         // detect escape codes and shrink the window,
         // so that the data is not decoded again in the next iteration
         match EscapeCode::from_byte(higher_byte) {
             Some(_) if higher_byte == lower_byte => {
-                self.window_length = 0;
-                let byte = self.window >> u8::BITS;
-                DecodedValue::Byte(byte as u8)
+                self.window.shrink(0);
+                DecodedValue::Byte(higher_byte)
             }
             Some(escape_code) => {
-                eprintln!("window = {:04x}", self.window);
-                self.window_length = 2;
+                self.window.shrink(2);
                 DecodedValue::EscapeCode(escape_code)
             }
-            None => {
-                self.window_length = 3;
-                let nibble = self.window >> (u8::BITS + u8::BITS / 2);
-                DecodedValue::Nibble(nibble as u8)
-            }
+            None => DecodedValue::Nibble(self.window.pop_front().unwrap()),
         }
-    }
-
-    /// Pushes the nibble into the window and
-    /// returns whether the window should be looked at or not
-    fn window_push(&mut self, nibble: u8) -> bool {
-        // ensures that the unused nibble is 0
-        let nibble = nibble & 0x0f;
-        // truncates the u16, so that only the least significant nibble is left
-        let previous_nibble = (self.window as u8) & 0x0f;
-        // whether value has changed
-        if previous_nibble == nibble {
-            return false;
-        }
-
-        // push received nibble
-        self.window <<= 4;
-        self.window |= nibble as u16;
-        self.window_length += 1;
-
-        // whether enough data has been pushed into the window
-        self.window_length == 4
     }
 }
 
@@ -175,6 +178,7 @@ impl Debug for DecodedValue {
 
 #[derive(Debug)]
 enum InputState {
+    WaitingForConnection,
     WaitingForFrame,
     ReadingFrame,
 }
@@ -208,28 +212,17 @@ impl Debug for Command {
 fn read_alternating() {
     let bytes = [0xf0; 64];
 
-    let (commands, _) = use_input_stream(bytes.into_iter());
-    assert_eq!(
-        commands
-            .iter()
-            .filter(|command| matches!(command, Command::Received(..)))
-            .collect::<Vec<_>>(),
-        vec![&Command::Received([0xf0; 64])],
-    );
+    let (stdout, _) = use_input_stream(bytes.into_iter());
+    assert_eq!(stdout, &[0xf0; 64]);
 }
 
 #[test]
 fn read_zeros() {
     let bytes = [0x00; 64];
 
-    let (commands, _) = use_input_stream(bytes.into_iter());
-    assert_eq!(
-        commands
-            .iter()
-            .filter(|command| matches!(command, Command::Received(..)))
-            .collect::<Vec<_>>(),
-        vec![&Command::Received([0x00; 64])],
-    );
+    let (stdout, stream) = use_input_stream(bytes.into_iter());
+    dbg!(&stdout);
+    assert_eq!(stdout, &[0x00; 64]);
 }
 
 #[test]
@@ -242,51 +235,33 @@ fn read_random() {
         0x6e, 0x23, 0xce, 0x40,
     ];
 
-    let (commands, _) = use_input_stream(bytes.into_iter());
+    let (stdout, _) = use_input_stream(bytes.into_iter());
     assert_eq!(
-        commands
-            .iter()
-            .filter(|command| matches!(command, Command::Received(..)))
-            .collect::<Vec<_>>(),
-        vec![&Command::Received([
+        stdout,
+        [
             0xa0, 0x8e, 0x4f, 0x24, 0x68, 0x53, 0x13, 0xcb, 0x17, 0xeb, 0xa1, 0xf2, 0x7e, 0xb3,
             0xab, 0x07, 0x00, 0x4c, 0xac, 0x54, 0x34, 0x34, 0x5b, 0x72, 0x96, 0x09, 0xc0, 0xda,
             0xbc, 0x17, 0xbc, 0xef, 0xa9, 0x7f, 0x65, 0x39, 0x58, 0x21, 0x72, 0xdd, 0x0b, 0xba,
             0x9a, 0x75, 0xcd, 0x5f, 0xa2, 0x44, 0x43, 0x1b, 0xd2, 0x0d, 0x5b, 0x7c, 0x65, 0xbb,
             0xc9, 0x4f, 0x78, 0xfe, 0x08, 0x6e, 0x23, 0x23,
-        ])],
+        ],
     );
 }
 
 #[cfg(test)]
-fn use_input_stream(data: impl Iterator<Item = u8>) -> (Vec<Command>, InputStream) {
-    use crate::{encode_frame, Escaped};
-    let mut iter = Escaped::new(data.map(|byte| Ok(byte)));
+fn use_input_stream(data: impl Iterator<Item = u8>) -> (Vec<u8>, InputStream) {
+    use crate::{
+        device::{DebugDevice, Device},
+        Connection, Escaped,
+    };
 
-    let mut output_stream = OutputStream::new();
-    let mut input_stream = InputStream::new();
-    let mut commands = Vec::new();
+    let bytes = Escaped::new(data.map(|byte| Ok(byte)));
+    let mut connection = Connection::new(DebugDevice::new(), bytes);
+    let mut stdout = Vec::new();
 
-    while !iter.is_done() {
-        let frame = encode_frame(&mut iter);
-        eprintln!("{}", bytes_to_debug_string(&frame));
+    while connection.poll(&mut stdout) {}
 
-        // TODO Use output stream
-        for byte in [&[0xf0; 5], frame.as_slice(), &[0xf0; 5]].concat() {
-            let higher_nibble = byte >> 4;
-            let lowher_nibble = byte & 0x0f;
-            commands.push(input_stream.push(higher_nibble));
-            if higher_nibble == lowher_nibble {
-                commands.push(input_stream.push(EscapeCode::Buffer1 as u8 >> 4));
-                commands.push(input_stream.push(EscapeCode::Buffer1 as u8));
-            }
-            commands.push(input_stream.push(lowher_nibble));
-            commands.push(input_stream.push(EscapeCode::Buffer1 as u8 >> 4));
-            commands.push(input_stream.push(EscapeCode::Buffer1 as u8));
-        }
-    }
-
-    return (commands, input_stream);
+    return (stdout, connection.i_stream);
 }
 
 fn bytes_to_debug_string(bytes: &[u8]) -> String {
@@ -300,6 +275,7 @@ fn bytes_to_debug_string(bytes: &[u8]) -> String {
     result + "]"
 }
 
+#[derive(PartialEq, Eq)]
 enum OutputState {
     WaitingForFrame,
     WritingFrame,
@@ -325,14 +301,15 @@ impl OutputStream {
     }
 
     pub fn send_frame(&mut self, frame: Frame) {
-        self.state = OutputState::WritingFrame;
+        self.state_transition(OutputState::WritingFrame);
+        dbg!(frame);
         self.frame = frame;
         self.index = 0;
     }
 
     /// Resets the internal state, but keeps the frame data.
     pub fn resend_frame(&mut self) {
-        self.state = OutputState::WaitingForFrame;
+        self.state_transition(OutputState::WritingFrame);
         self.index = 0;
     }
 
@@ -341,14 +318,25 @@ impl OutputStream {
         match self.state {
             OutputState::WaitingForFrame => self.waiting_for_frame(),
             OutputState::WritingFrame => {
-                if let Some(nibble) = self.writing_frame() {
+                if let Some(nibble) = self.next_nibble() {
                     nibble
                 } else {
-                    self.state = OutputState::WaitingForFrame;
                     self.waiting_for_frame()
                 }
             }
         }
+    }
+
+    fn state_transition(&mut self, next: OutputState) {
+        use OutputState::*;
+
+        match (&self.state, &next) {
+            (WaitingForFrame, WritingFrame) => eprintln!("=== Output: Writing frame ==="),
+            (WritingFrame, WaitingForFrame) => eprintln!("=== Output: Waiting for frame ==="),
+            (WaitingForFrame, WaitingForFrame) | (WritingFrame, WritingFrame) => unreachable!(),
+        }
+
+        self.state = next;
     }
 
     fn waiting_for_frame(&mut self) -> u8 {
@@ -357,7 +345,7 @@ impl OutputStream {
         nibble
     }
 
-    fn writing_frame(&mut self) -> Option<u8> {
+    fn next_nibble(&mut self) -> Option<u8> {
         if let Some(byte) = self.frame.get(self.index / 2) {
             let nibble = if self.index % 2 == 0 {
                 byte >> 4
@@ -424,7 +412,15 @@ impl<const N: usize> Window<N> {
     }
 
     fn push_back(&mut self, nibble: u8) -> Option<u8> {
+        let nibble = nibble & 0x0f;
+        // println!("nibble = {:02x?}", nibble);
+
         let prev = self.data;
+        // print!("prev = ");
+        // for i in 0..prev.len() {
+        //     print!("{:02x?}", prev[i]);
+        // }
+        // println!();
 
         // Shift every nibble 4 bits to the left
         for (index, byte) in self.data.iter_mut().enumerate() {
@@ -471,6 +467,16 @@ impl<const N: usize> Window<N> {
         not_empty.then_some(prev[prev.len() - 1] & 0x0f)
     }
 
+    fn shrink(&mut self, len: usize) {
+        for i in 0..(len / 2) {
+            self.data[i] = 0;
+        }
+        if len % 2 == 1 {
+            self.data[len / 2 + 1] &= 0x0f;
+        }
+        self.len = len;
+    }
+
     fn get(&self, index: usize) -> Option<u8> {
         if index >= self.len {
             return None;
@@ -484,6 +490,17 @@ impl<const N: usize> Window<N> {
             byte >> 4
         };
         Some(nibble)
+    }
+}
+
+impl<const N: usize> Debug for Window<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Window[")?;
+        (0..self.len)
+            .map(|i| self.get(i).unwrap())
+            .rev()
+            .for_each(|nibble| write!(f, "{nibble:01x?}").unwrap());
+        write!(f, "]")
     }
 }
 
