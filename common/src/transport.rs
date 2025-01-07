@@ -1,10 +1,23 @@
-use b15f::{B15f, B15fStud};
+use crate::device::Device;
+
+#[cfg(target_arch = "avr")]
+macro_rules! dbg {
+    () => {};
+    ($val:expr $(,)?) => {
+        match $val {
+            val => val,
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        $val
+    };
+}
 
 // How many bits are sent at once
 const BIT_WIDTH: u8 = 3;
 
-struct TransportEncode<B: B15f> {
-    driver: B,
+pub struct TransportEncode<D: Device> {
+    device: D,
     // buffer of variable size with data to be sent
     data: [u8; 64],
     // length of the data to be sent in bits
@@ -12,13 +25,10 @@ struct TransportEncode<B: B15f> {
     clock: u8,
 }
 
-impl<B: B15f> TransportEncode<B> {
-    pub fn new() -> Self {
-        let mut driver = B::new().unwrap();
-        // Use lower nibble of the register to send data
-        driver.set_register_ddra(0x0f);
+impl<D: Device> TransportEncode<D> {
+    pub fn new(device: D) -> Self {
         Self {
-            driver,
+            device,
             data: [0; 64],
             bits: 0,
             clock: 0,
@@ -27,7 +37,7 @@ impl<B: B15f> TransportEncode<B> {
 
     pub fn poll(&mut self) {
         let nibble = self.clock | self.pop(BIT_WIDTH);
-        self.driver.set_register_porta(nibble);
+        self.device.write(nibble);
         self.clock = if self.clock == 0 { 0b00001000 } else { 0 }
     }
 
@@ -69,18 +79,19 @@ const fn bitmask_lower(width: u8) -> u8 {
 
 #[test]
 fn encode() {
-    let data = [0xf0; 4];
-    let mut encoder = TransportEncode::<B15fStud>::new();
-    encoder.push(0xff);
-    encoder.poll();
-    encoder.poll();
-    for byte in data {
-        encoder.push(byte);
-    }
-    assert_eq!(
-        &[0b00000011, 0b11000011, 0b11000011, 0b11000011, 0b11000011],
-        encoder.data.last_chunk::<5>().unwrap()
-    );
+    todo!()
+    // let data = [0xf0; 4];
+    // let mut encoder = TransportEncode::<B15fStud>::new();
+    // encoder.push(0xff);
+    // encoder.poll();
+    // encoder.poll();
+    // for byte in data {
+    //     encoder.push(byte);
+    // }
+    // assert_eq!(
+    //     &[0b00000011, 0b11000011, 0b11000011, 0b11000011, 0b11000011],
+    //     encoder.data.last_chunk::<5>().unwrap()
+    // );
 }
 
 fn slice_bit_shift_left<const N: usize>(slice: &mut [u8; N], by: u32) {

@@ -1,5 +1,3 @@
-use std::io;
-
 #[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum EscapeCode {
@@ -33,19 +31,19 @@ impl EscapeCode {
     pub fn from_byte(byte: u8) -> Option<Self> {
         Self::VALUES.contains(&byte).then_some(
             /* SAFETY: byte is a valid escape code */
-            unsafe { std::mem::transmute(byte) },
+            unsafe { core::mem::transmute(byte) },
         )
     }
 }
 
-pub struct Escaped<I: Iterator<Item = io::Result<u8>>> {
+pub struct Escaped<I: Iterator<Item = u8>> {
     bytes: I,
     /// Second half of an escaped value
     escape: Option<u8>,
     done: bool,
 }
 
-impl<I: Iterator<Item = io::Result<u8>>> Escaped<I> {
+impl<I: Iterator<Item = u8>> Escaped<I> {
     pub fn new(bytes: I) -> Self {
         Self {
             bytes,
@@ -59,20 +57,18 @@ impl<I: Iterator<Item = io::Result<u8>>> Escaped<I> {
     }
 }
 
-impl<I: Iterator<Item = io::Result<u8>>> Iterator for Escaped<I> {
-    type Item = Result<u8, io::Error>;
+impl<I: Iterator<Item = u8>> Iterator for Escaped<I> {
+    type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(byte) = self.escape.take() {
-            return Some(Ok(byte));
+            return Some(byte);
         }
 
-        let result = self.bytes.next().inspect(|maybe_byte| {
-            if let Ok(byte) = maybe_byte {
-                // Repeat value of escape code to escape it
-                if EscapeCode::VALUES.contains(&byte) {
-                    self.escape = Some(*byte);
-                }
+        let result = self.bytes.next().inspect(|byte| {
+            // Repeat value of escape code to escape it
+            if EscapeCode::VALUES.contains(&byte) {
+                self.escape = Some(*byte);
             }
         });
         self.done = result.is_some();

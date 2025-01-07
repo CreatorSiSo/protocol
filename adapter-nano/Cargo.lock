@@ -7,6 +7,7 @@ name = "adapter-nano"
 version = "0.1.0"
 dependencies = [
  "arduino-hal",
+ "common",
  "embedded-hal 1.0.0",
  "nb 1.1.0",
  "panic-halt",
@@ -87,6 +88,10 @@ name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+
+[[package]]
+name = "common"
+version = "0.1.0"
 
 [[package]]
 name = "critical-section"
