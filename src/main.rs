@@ -1,9 +1,10 @@
-use std::fs;
 use std::io::{stdin, stdout, Read, Write};
 use std::{thread, time::Duration};
 
+mod transport;
+
 mod device;
-use device::{B15fDevice, DebugDevice, Device};
+use device::{B15fDevice, Device};
 use escape::{EscapeCode, Escaped};
 
 mod escape;
@@ -12,12 +13,13 @@ mod stream;
 use stream::{Command, InputStream, OutputStream};
 
 fn main() -> Result<(), &'static str> {
-    // let stdin = stdin().lock().bytes();
-    let input = fs::read("./data/random-256.bin").unwrap();
+    let stdin = stdin().lock().bytes();
+    let stdout = stdout().lock();
+    // let input = fs::read("./data/random-256.bin").unwrap();
 
-    let mut connection = Connection::new(DebugDevice::new(), input.bytes());
+    let mut connection = Connection::new(stdin, std::iter::empty(), stdout);
 
-    while connection.poll(stdout().lock().by_ref()) {
+    while connection.poll() {
         thread::sleep(Duration::from_millis(1));
     }
 
@@ -91,55 +93,55 @@ fn decode_frame(frame: &[u8; FRAME_DATA_LEN + CHECKSUM_LEN]) -> &[u8] {
     frame
 }
 
-struct Connection<D: Device, I: Iterator<Item = std::io::Result<u8>>> {
-    device: D,
-    i_stream: InputStream,
-    o_stream: OutputStream,
-    data: Escaped<I>,
+trait Bytes: Iterator<Item = std::io::Result<u8>> {}
+impl<T: Iterator<Item = std::io::Result<u8>>> Bytes for T {}
+
+struct Connection<D: Bytes, R: Bytes, W: Write> {
+    data: Escaped<D>,
+    input: R,
+    output: W,
+    clock: usize,
     done_receiving: bool,
-    debug_lines: [String; 4],
 }
 
-impl<D: Device, I: Iterator<Item = std::io::Result<u8>>> Connection<D, I> {
-    fn new(device: D, bytes: I) -> Self {
+impl<D: Bytes, R: Bytes, W: Write> Connection<D, R, W> {
+    fn new(data: D, input: R, output: W) -> Self {
         Self {
-            device,
-            i_stream: InputStream::new(),
-            o_stream: OutputStream::new(),
-            data: Escaped::new(bytes),
+            data: Escaped::new(data),
+            input,
+            output,
+            clock: 0,
             done_receiving: false,
-            debug_lines: [const { String::new() }; 4],
         }
     }
 
     // Returns false when all data has been sent and received
-    fn poll(&mut self, output: &mut dyn Write) -> bool {
-        let nibble_in = self.device.read();
-        match self.i_stream.push(nibble_in) {
-            Command::Received(frame) => output.write_all(decode_frame(&frame)).unwrap(),
-            Command::SendNextFrame => {
-                for line in &mut self.debug_lines {
-                    eprintln!("{} {}", self.device.name(), line);
-                    line.clear();
-                }
-                self.o_stream.send_frame(encode_frame(&mut self.data));
-            }
-            Command::ResendLastFrame => self.o_stream.resend_frame(),
-            Command::StopReceivingData => self.done_receiving = true,
-            Command::None => (),
-        };
+    fn poll(&mut self) -> bool {
+        // Read byte and decode command
+        let byte_in = self.input.next();
+        eprintln!("input: {:0x?}", byte_in);
+        // match self.i_stream.push(nibble_in) {
+        //     Command::Received(frame) => output.write_all(decode_frame(&frame)).unwrap(),
+        //     Command::SendNextFrame => {
+        //         for line in &mut self.debug_lines {
+        //             eprintln!("{} {}", self.device.name(), line);
+        //             line.clear();
+        //         }
+        //         self.o_stream.send_frame(encode_frame(&mut self.data));
+        //     }
+        //     Command::ResendLastFrame => self.o_stream.resend_frame(),
+        //     Command::StopReceivingData => self.done_receiving = true,
+        //     Command::None => (),
+        // };
 
-        let nibble_out = self.o_stream.next();
-        self.device.send(nibble_out);
-        for i in 0..4 {
-            self.debug_lines[i].push_str(if (nibble_out << i) & 0b1000 == 0b1000 {
-                "◻️"
-            } else {
-                "◼"
-            });
-        }
-
-        self.device.debug_poll();
+        // Write byte
+        let byte_out = self
+            .data
+            .next()
+            .unwrap_or(Ok((self.clock % 2) as u8))
+            .unwrap();
+        self.output.write_all(&[byte_out]).unwrap();
+        eprintln!("out:   {:0x?}", byte_out);
 
         !(self.data.is_done() && self.done_receiving)
     }

@@ -1,6 +1,6 @@
 use std::{io, iter};
 
-use b15f::B15fDriver;
+use b15f::{B15f, B15fDriver};
 
 use crate::Connection;
 
@@ -47,34 +47,34 @@ impl Device for B15fDevice {
 
 pub struct Arduino;
 
-pub struct DebugDevice {
-    other_side: Connection<MirrorDevice, iter::Empty<io::Result<u8>>>,
-}
+// pub struct DebugDevice {
+//     other_side: Connection<MirrorDevice, iter::Empty<io::Result<u8>>>,
+// }
 
-impl DebugDevice {
-    pub fn new() -> Self {
-        Self {
-            other_side: Connection::new(MirrorDevice::new(), iter::empty()),
-        }
-    }
-}
+// impl DebugDevice {
+//     pub fn new() -> Self {
+//         Self {
+//             other_side: Connection::new(MirrorDevice::new(), iter::empty()),
+//         }
+//     }
+// }
 
-impl Device for DebugDevice {
-    const NAME: &'static str = "Debug";
+// impl Device for DebugDevice {
+//     const NAME: &'static str = "Debug";
 
-    fn send(&mut self, data: u8) {
-        // eprintln!("{} {:04b}", self.name(), data);
-        self.other_side.device.incoming = data;
-    }
+//     fn send(&mut self, data: u8) {
+//         // eprintln!("{} {:04b}", self.name(), data);
+//         self.other_side.device.incoming = data;
+//     }
 
-    fn read(&self) -> u8 {
-        self.other_side.device.outgoing
-    }
+//     fn read(&self) -> u8 {
+//         self.other_side.device.outgoing
+//     }
 
-    fn debug_poll(&mut self) {
-        self.other_side.poll(&mut Vec::new());
-    }
-}
+//     fn debug_poll(&mut self) {
+//         self.other_side.poll(&mut Vec::new());
+//     }
+// }
 
 pub struct MirrorDevice {
     incoming: u8,
