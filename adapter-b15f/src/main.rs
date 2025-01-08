@@ -33,7 +33,7 @@ impl B15fDevice {
 impl Device for B15fDevice {
     const NAME: &'static str = "B15f";
 
-    fn read(&self) -> u8 {
+    fn read(&mut self) -> u8 {
         self.driver.get_register_pina()
     }
 

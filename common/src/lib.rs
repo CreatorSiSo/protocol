@@ -86,23 +86,36 @@ pub enum Command {
 }
 
 #[cfg(not(target_arch = "avr"))]
+fn debug_bytes_hex(bytes: &[u8]) -> String {
+    let mut result = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .zip(core::iter::repeat(", "))
+        .fold(String::from("["), |accum, (l, r)| accum + &l + r);
+    result.pop();
+    result.pop();
+    result + "]"
+}
+
+#[cfg(not(target_arch = "avr"))]
+fn debug_bytes_binary(bytes: &[u8]) -> String {
+    let mut result = bytes
+        .iter()
+        .map(|byte| format!("{byte:08b}"))
+        .zip(core::iter::repeat(", "))
+        .fold(String::from("["), |accum, (l, r)| accum + &l + r);
+    result.pop();
+    result.pop();
+    result + "]"
+}
+
+#[cfg(not(target_arch = "avr"))]
 impl core::fmt::Debug for Command {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        fn bytes_to_debug_string(bytes: &[u8]) -> String {
-            let mut result = bytes
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .zip(core::iter::repeat(", "))
-                .fold(String::from("["), |accum, (l, r)| accum + &l + r);
-            result.pop();
-            result.pop();
-            result + "]"
-        }
-
         match self {
             Self::Received(arg0) => f
                 .debug_tuple("Received")
-                .field(&bytes_to_debug_string(arg0))
+                .field(&debug_bytes_hex(arg0))
                 .finish(),
             Self::SendNextFrame => f.write_str("SendNextFrame"),
             Self::ResendLastFrame => f.write_str("ResendLastFrame"),

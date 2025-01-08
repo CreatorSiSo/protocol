@@ -1,8 +1,8 @@
 pub trait Device {
-    const NAME: &'static str;
+    const NAME: &'static str = "UNNAMED";
 
     /// Only reads lower nibble of byte.
-    fn read(&self) -> u8;
+    fn read(&mut self) -> u8;
 
     /// Only sends lower nibble of byte.
     fn write(&mut self, data: u8);
