@@ -38,16 +38,14 @@ impl<const C: usize> BitVec<C> {
     }
 
     // Push another BitVec to the front
-    pub fn push_front<const O: usize>(&mut self, other: &BitVec<O>) {
+    // Returns true if the BitVec has reached its capacity
+    pub fn push_front<const O: usize>(&mut self, other: &BitVec<O>) -> bool {
         // Ensure there is enough capacity to add the other BitVec
         if self.len + other.len > (C * 8) {
-            panic!("Not enough capacity");
+            return true;
         }
 
-        // Shift existing bits to the right
-        for i in (1..=self.len).rev() {
-            self.bytes[i] = self.bytes[i - 1];
-        }
+        self.shift_right(other.len as u32);
 
         // Insert the bits of the other BitVec at the front
         let mut other_index = 0;
@@ -57,8 +55,8 @@ impl<const C: usize> BitVec<C> {
             other_index += 1;
         }
 
-        // Update the length
         self.len += other.len;
+        false
     }
 
     pub fn push_back<const O: usize>(&mut self, other: &BitVec<O>) {
@@ -76,6 +74,11 @@ impl<const C: usize> BitVec<C> {
 
         // Update the length of the BitVec
         self.len += other.len;
+    }
+
+    pub fn push_back_bool(&mut self, value: bool) {
+        self.set_unchecked(self.len, value);
+        self.len += 1;
     }
 
     pub fn pop_front<const R: usize>(&mut self, width: usize) -> Option<BitVec<R>> {

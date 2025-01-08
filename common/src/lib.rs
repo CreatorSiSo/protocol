@@ -10,6 +10,10 @@ mod escape;
 use escape::EscapeCode;
 
 mod bitvec;
+pub use bitvec::BitVec;
+
+mod connection;
+pub use connection::MirrorConnection;
 
 const ESCAPE_CODE_LEN: usize = 1;
 const CHECKSUM_LEN: usize = 0;
@@ -75,54 +79,4 @@ fn encode_frame(data: &mut impl Iterator<Item = u8>) -> Frame {
 ///
 fn decode_frame(frame: &[u8; FRAME_DATA_LEN + CHECKSUM_LEN]) -> &[u8] {
     frame
-}
-
-#[derive(PartialEq, Eq)]
-pub enum Command {
-    Received([u8; FRAME_DATA_LEN + CHECKSUM_LEN]),
-    SendNextFrame,
-    ResendLastFrame,
-    /// From now on the other side will only send escape codes
-    StopReceivingData,
-    None,
-}
-
-#[cfg(not(target_arch = "avr"))]
-fn debug_bytes_hex(bytes: &[u8]) -> String {
-    let mut result = bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .zip(core::iter::repeat(", "))
-        .fold(String::from("["), |accum, (l, r)| accum + &l + r);
-    result.pop();
-    result.pop();
-    result + "]"
-}
-
-#[cfg(not(target_arch = "avr"))]
-fn debug_bytes_binary(bytes: &[u8]) -> String {
-    let mut result = bytes
-        .iter()
-        .map(|byte| format!("{byte:08b}"))
-        .zip(core::iter::repeat(", "))
-        .fold(String::from("["), |accum, (l, r)| accum + &l + r);
-    result.pop();
-    result.pop();
-    result + "]"
-}
-
-#[cfg(not(target_arch = "avr"))]
-impl core::fmt::Debug for Command {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Received(arg0) => f
-                .debug_tuple("Received")
-                .field(&debug_bytes_hex(arg0))
-                .finish(),
-            Self::SendNextFrame => f.write_str("SendNextFrame"),
-            Self::ResendLastFrame => f.write_str("ResendLastFrame"),
-            Self::StopReceivingData => f.write_str("StopReceivingData"),
-            Self::None => f.write_str("None"),
-        }
-    }
 }
