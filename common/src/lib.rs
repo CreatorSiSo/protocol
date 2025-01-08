@@ -9,6 +9,8 @@ pub use device::Device;
 mod escape;
 use escape::EscapeCode;
 
+mod bitvec;
+
 const ESCAPE_CODE_LEN: usize = 1;
 const CHECKSUM_LEN: usize = 0;
 const FRAME_DATA_LEN: usize = 64;

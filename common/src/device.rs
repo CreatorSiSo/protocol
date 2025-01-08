@@ -1,11 +1,13 @@
+use crate::bitvec::BitVec;
+
 pub trait Device {
     const NAME: &'static str = "UNNAMED";
 
-    /// Only reads lower nibble of byte.
-    fn read(&mut self) -> u8;
+    /// Only reads upper nibble of byte.
+    fn read(&mut self) -> BitVec<1>;
 
-    /// Only sends lower nibble of byte.
-    fn write(&mut self, data: u8);
+    /// Only sends upper nibble of byte.
+    fn write(&mut self, data: BitVec<1>);
 
     /// TODO Remove, only used for debugging
     fn debug_poll(&mut self) {}
