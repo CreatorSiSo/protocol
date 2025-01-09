@@ -9,11 +9,14 @@ pub use device::Device;
 mod escape;
 use escape::EscapeCode;
 
+mod bititer;
+pub use bititer::BitIter;
+
 mod bitvec;
 pub use bitvec::BitVec;
 
 mod connection;
-pub use connection::MirrorConnection;
+pub use connection::{Connection, MirrorConnection};
 
 const ESCAPE_CODE_LEN: usize = 1;
 const CHECKSUM_LEN: usize = 0;

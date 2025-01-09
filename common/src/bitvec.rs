@@ -1,6 +1,9 @@
 use core::fmt::Debug;
 use core::fmt::Display;
 use core::ops::BitOr;
+use core::ops::Not;
+
+use crate::BitIter;
 
 // u8 array based bit vec with a maximum capacity set at compile time.
 // The bit order is most significant bit at index 0.
@@ -18,15 +21,6 @@ impl<const C: usize> BitVec<C> {
         }
     }
 
-    pub fn from_byte(byte: u8, len: usize) -> Self {
-        debug_assert!(len <= 8);
-        let mut bytes = [0; C];
-        bytes[0] = byte;
-        let mut result = Self { len, bytes };
-        result.clear_remaining_bits();
-        result
-    }
-
     pub fn from_bytes(bytes: [u8; C], len: usize) -> Self {
         let mut result = Self { len, bytes };
         result.clear_remaining_bits();
@@ -39,46 +33,36 @@ impl<const C: usize> BitVec<C> {
 
     // Push another BitVec to the front
     // Returns true if the BitVec has reached its capacity
-    pub fn push_front<const O: usize>(&mut self, other: &BitVec<O>) -> bool {
+    pub fn push_front(&mut self, other: &impl BitIter) {
+        let iter = other.iter();
         // Ensure there is enough capacity to add the other BitVec
-        if self.len + other.len > (C * 8) {
-            return true;
+        if self.len + iter.len() > (C * 8) {
+            panic!()
         }
 
-        self.shift_right(other.len as u32);
+        self.len += iter.len();
+        self.shift_right(iter.len() as u32);
 
         // Insert the bits of the other BitVec at the front
-        let mut other_index = 0;
-        for i in 0..other.len {
-            let bit = (other.bytes[other_index / 8] >> (7 - other_index % 8)) & 1;
-            self.set_unchecked(i, bit == 1);
-            other_index += 1;
+        for (i, bit) in iter.enumerate() {
+            self.set_unchecked(i, bit);
         }
-
-        self.len += other.len;
-        false
     }
 
-    pub fn push_back<const O: usize>(&mut self, other: &BitVec<O>) {
+    pub fn push_back(&mut self, other: &impl BitIter) {
+        let iter = other.iter();
+        let iter_len = iter.len();
+
         // Ensure there is enough capacity to add the other BitVec
-        if self.len + other.len > (C * 8) {
+        if self.len + iter.len() > (C * 8) {
             panic!("Not enough capacity");
         }
-        // Append the bits from the other BitVec to the back of self
-        let mut other_index = 0;
-        for i in self.len..(self.len + other.len) {
-            let bit = (other.bytes[other_index / 8] >> (7 - other_index % 8)) & 1;
-            self.set_unchecked(i, bit == 1);
-            other_index += 1;
+
+        for (bit, i) in iter.zip(self.len..) {
+            self.set_unchecked(i, bit);
         }
 
-        // Update the length of the BitVec
-        self.len += other.len;
-    }
-
-    pub fn push_back_bool(&mut self, value: bool) {
-        self.set_unchecked(self.len, value);
-        self.len += 1;
+        self.len += iter_len;
     }
 
     pub fn pop_front<const R: usize>(&mut self, width: usize) -> Option<BitVec<R>> {
@@ -151,6 +135,14 @@ impl<const C: usize> BitVec<C> {
         self.set_unchecked(index, value);
     }
 
+    pub fn toggle(&mut self, index: usize) {
+        if self.get(index).unwrap() == false {
+            self.set_unchecked(index, true);
+        } else {
+            self.set_unchecked(index, false);
+        }
+    }
+
     fn set_unchecked(&mut self, index: usize, value: bool) {
         let byte_index = index / 8;
         let bit_index = 7 - (index % 8); // MSB at index 0
@@ -169,10 +161,6 @@ impl<const C: usize> BitVec<C> {
     pub fn shift_right(&mut self, by: u32) {
         slice_shift_right(&mut self.bytes, by);
         self.clear_remaining_bits();
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
-        (0..self.len).map_while(|i| self.get(i))
     }
 
     pub fn bytes(&self) -> &[u8] {
@@ -201,6 +189,24 @@ impl<const C: usize> BitVec<C> {
     }
 }
 
+impl<const C: usize, B: BitIter> From<&B> for BitVec<C> {
+    fn from(value: &B) -> Self {
+        let mut result = Self::new();
+        let iter = value.iter();
+        result.len = iter.len();
+        for (i, bit) in iter.enumerate() {
+            result.set_unchecked(i, bit);
+        }
+        result
+    }
+}
+
+impl<const C: usize> BitIter for BitVec<C> {
+    fn iter(&self) -> impl ExactSizeIterator<Item = bool> {
+        (0..self.len).map(|i| self.get(i).unwrap())
+    }
+}
+
 impl<const C: usize, const O: usize> PartialEq<BitVec<O>> for BitVec<C> {
     fn eq(&self, other: &BitVec<O>) -> bool {
         if self.len != other.len {
@@ -225,6 +231,18 @@ impl<const C: usize, const O: usize> PartialEq<BitVec<O>> for BitVec<C> {
         }
 
         true
+    }
+}
+
+impl<const C: usize> Not for BitVec<C> {
+    type Output = BitVec<C>;
+
+    fn not(mut self) -> Self::Output {
+        for byte in self.bytes.iter_mut() {
+            *byte = !*byte;
+        }
+        self.clear_remaining_bits();
+        self
     }
 }
 
@@ -268,7 +286,8 @@ impl<const C: usize> Debug for BitVec<C> {
 
 #[test]
 fn bitvec_get() {
-    let bitvec = BitVec::from_bytes([0b1010_1110, 0b1000_0000], 9);
+    let bitvec: BitVec<2> =
+        BitVec::from(&[true, false, true, false, true, true, true, false, true]);
     assert_eq!(bitvec.get(0), Some(true));
     assert_eq!(bitvec.get(1), Some(false));
     assert_eq!(bitvec.get(7), Some(false));

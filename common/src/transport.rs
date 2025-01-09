@@ -1,3 +1,4 @@
+use crate::bititer::Byte;
 use crate::bitvec::BitVec;
 use crate::device::Device;
 
@@ -5,37 +6,38 @@ use crate::device::Device;
 const BIT_WIDTH: usize = 3;
 
 pub struct TransportEncode {
-    clock: BitVec<1>,
+    clock: bool,
     data: BitVec<64>,
 }
 
 impl TransportEncode {
     pub fn new() -> Self {
         Self {
-            clock: BitVec::from_byte(0, 4),
+            clock: false,
             data: BitVec::new(),
         }
     }
 
-    pub fn poll(&mut self, device: &mut impl Device) {
-        // Concat clock and data into the nibble to be sent
-        let Some(data) = self.data.pop_back::<1>(BIT_WIDTH) else {
-            return;
-        };
-        let mut nibble = self.clock.clone();
-        nibble.push_back(&data);
-
+    pub fn establish_connection(&mut self, device: &mut impl Device) {
+        let nibble = BitVec::from(&Byte(if self.clock { 0xf0 } else { 0x00 }));
         device.write(nibble);
-
-        if self.clock.get(0).unwrap() == false {
-            self.clock.set(0, true);
-        } else {
-            self.clock.set(0, false);
-        }
+        self.clock = !self.clock;
     }
 
-    pub fn push(&mut self, byte: u8) -> bool {
-        self.data.push_front(&BitVec::<1>::from_byte(byte, 8))
+    pub fn poll(&mut self, device: &mut impl Device) {
+        // Concat clock and data into the nibble to be sent
+        let Some(mut data) = self.data.pop_back::<1>(BIT_WIDTH) else {
+            return;
+        };
+        data.push_front(&self.clock);
+
+        device.write(data);
+
+        self.clock = !self.clock;
+    }
+
+    pub fn push(&mut self, byte: &BitVec<1>) {
+        self.data.push_front(byte)
     }
 
     pub fn amount_bits_remaining(&self) -> usize {
@@ -56,11 +58,13 @@ fn encode() {
     let mut device = TestDevice {};
 
     let mut encoder = TransportEncode::new();
-    encoder.push(0xff);
+    encoder.push(&BitVec::from(&Byte(0xff)));
     encoder.poll(&mut device);
     encoder.poll(&mut device);
+    dbg!(&encoder.data);
     for byte in [0xf0; 4] {
-        encoder.push(byte);
+        encoder.push(&BitVec::from(&Byte(byte)));
+        dbg!(&encoder.data);
     }
     assert_eq!(
         BitVec::from_bytes(
@@ -78,34 +82,42 @@ fn encode() {
 }
 
 pub struct TransportDecode {
-    last_clock: bool,
+    last: BitVec<1>,
     data: BitVec<64>,
 }
 
 impl TransportDecode {
     pub fn new() -> Self {
         Self {
-            last_clock: false,
+            last: BitVec::from(&Byte(0x00)),
             data: BitVec::new(),
         }
+    }
+
+    pub fn establish_connection(&mut self, device: &mut impl Device) -> bool {
+        let mut nibble = device.read();
+        let next = nibble.pop_front::<1>(1).unwrap();
+        let successful = !next == self.last;
+        self.last = next;
+        successful
     }
 
     // Tries to read data from the cable
     pub fn poll(&mut self, device: &mut impl Device) {
         let mut nibble = device.read();
-        let next_clock = nibble.pop_front::<1>(1).unwrap().get(0).unwrap();
-        if next_clock == self.last_clock {
+        let next = nibble.pop_front::<1>(1).unwrap();
+        if next.get(0).unwrap() == self.last.get(0).unwrap() {
             // Clock has not changed since last read
             return;
         }
-        self.last_clock = next_clock;
+        self.last = next;
         self.data.push_back(&nibble);
     }
 
     // Returns the next full byte of received data,
     // `None` if no full 8 bits of data are available (yet)
-    pub fn read(&mut self) -> Option<u8> {
-        self.data.pop_front::<1>(8).map(|bitvec| bitvec.bytes()[0])
+    pub fn read(&mut self) -> Option<BitVec<1>> {
+        self.data.pop_front::<1>(8)
     }
 }
 
@@ -118,9 +130,9 @@ fn decode() {
         fn read(&mut self) -> BitVec<1> {
             self.clock = !self.clock;
             if self.clock {
-                BitVec::from_byte(0b0001_0000, 4)
+                BitVec::from(&[false, false, false, true])
             } else {
-                BitVec::from_byte(0b1000_0000, 4)
+                BitVec::from(&[true, false, false, false])
             }
         }
 
@@ -137,6 +149,6 @@ fn decode() {
     assert_eq!(decoder.read(), None);
 
     decoder.poll(&mut device);
-    assert_eq!(decoder.read(), Some(4));
+    assert_eq!(decoder.read(), Some(BitVec::from(&Byte(0b000_001_00))));
     assert_eq!(decoder.data.len(), 1);
 }

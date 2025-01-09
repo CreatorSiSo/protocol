@@ -1,20 +1,25 @@
 use b15f::{B15f, B15fDriver};
-use common::Device;
-use std::io::{Read, stdin, stdout};
-use std::{thread, time::Duration};
+use common::{BitVec, Connection, Device, MirrorConnection};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 fn main() -> Result<(), &'static str> {
-    let stdin = stdin().lock().bytes();
-    let stdout = stdout().lock();
+    // let stdin = stdin().lock().bytes();
+    // let stdout = stdout().lock();
     // let input = fs::read("./data/random-256.bin").unwrap();
 
-    // let mut connection = Connection::new(stdin, std::iter::empty(), stdout);
+    let device = B15fDevice::new()?;
+    let mut connection = MirrorConnection::new(device);
 
-    // while connection.poll() {
-    //     thread::sleep(Duration::from_millis(1));
-    // }
+    loop {
+        let now = Instant::now();
+        connection.poll();
 
-    Ok(())
+        thread::sleep(Duration::from_millis(100 - 30));
+        println!("Actual loop time: {}ms", now.elapsed().as_millis());
+    }
 }
 
 pub struct B15fDevice {
@@ -25,19 +30,17 @@ impl B15fDevice {
     pub fn new() -> Result<Self, &'static str> {
         let mut driver = B15fDriver::new()?;
         // Use lower nibble of the register to send data
-        driver.set_register_ddra(0x0f);
+        driver.set_register_ddra(0xf0);
         Ok(Self { driver })
     }
 }
 
 impl Device for B15fDevice {
-    const NAME: &'static str = "B15f";
-
-    fn read(&mut self) -> u8 {
-        self.driver.get_register_pina()
+    fn read(&mut self) -> BitVec<1> {
+        BitVec::from_bytes([self.driver.get_register_pina()], 4)
     }
 
-    fn write(&mut self, data: u8) {
-        self.driver.set_register_porta(data);
+    fn write(&mut self, data: BitVec<1>) {
+        self.driver.set_register_porta(data.bytes()[0]);
     }
 }
