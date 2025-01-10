@@ -1,9 +1,6 @@
 use b15f::{B15f, B15fDriver};
 use common::{BitVec, Connection, Device, MirrorConnection};
-use std::{
-    thread,
-    time::{Duration, Instant},
-};
+use std::{thread, time::Duration};
 
 fn main() -> Result<(), &'static str> {
     // let stdin = stdin().lock().bytes();
@@ -14,11 +11,10 @@ fn main() -> Result<(), &'static str> {
     let mut connection = MirrorConnection::new(device);
 
     loop {
-        let now = Instant::now();
+        // let now = Instant::now();
         connection.poll();
-
         thread::sleep(Duration::from_millis(100 - 30));
-        println!("Actual loop time: {}ms", now.elapsed().as_millis());
+        // println!("Actual loop time: {}ms", now.elapsed().as_millis());
     }
 }
 

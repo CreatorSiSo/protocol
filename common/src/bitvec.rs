@@ -3,6 +3,7 @@ use core::fmt::Display;
 use core::ops::BitOr;
 use core::ops::Not;
 
+use crate::bititer::Byte;
 use crate::BitIter;
 
 // u8 array based bit vec with a maximum capacity set at compile time.
@@ -33,11 +34,11 @@ impl<const C: usize> BitVec<C> {
 
     // Push another BitVec to the front
     // Returns true if the BitVec has reached its capacity
-    pub fn push_front(&mut self, other: &impl BitIter) {
+    pub fn push_front(&mut self, other: &impl BitIter) -> bool {
         let iter = other.iter();
         // Ensure there is enough capacity to add the other BitVec
         if self.len + iter.len() > (C * 8) {
-            panic!()
+            return true;
         }
 
         self.len += iter.len();
@@ -47,6 +48,7 @@ impl<const C: usize> BitVec<C> {
         for (i, bit) in iter.enumerate() {
             self.set_unchecked(i, bit);
         }
+        false
     }
 
     pub fn push_back(&mut self, other: &impl BitIter) {
@@ -79,9 +81,7 @@ impl<const C: usize> BitVec<C> {
         result.bytes.copy_from_slice(&self.bytes[..R]);
         result.clear_remaining_bits();
 
-        self.shift_left(width as u32);
-        self.len -= width;
-        self.clear_remaining_bits();
+        self.shrink_front(width);
 
         Some(result)
     }
@@ -89,13 +89,9 @@ impl<const C: usize> BitVec<C> {
     // Pop a number of bits from the back
     pub fn pop_back<const R: usize>(&mut self, width: usize) -> Option<BitVec<R>> {
         debug_assert!(width <= (R * 8));
-
         if width > self.len {
             return None;
         }
-
-        let old_len = self.len;
-        let new_len = old_len - width;
 
         let mut popped = BitVec {
             len: width,
@@ -104,16 +100,41 @@ impl<const C: usize> BitVec<C> {
 
         // Copy the bits that are being popped from self to popped
         let mut bit_index = 0;
-        for i in new_len..old_len {
+        for i in (self.len - width)..self.len {
             let bit = (self.bytes[i / 8] >> (7 - i % 8)) & 1;
             popped.set_unchecked(bit_index, bit == 1);
             bit_index += 1;
         }
 
-        self.len = new_len;
-        self.clear_remaining_bits();
+        self.shrink_back(width);
 
         Some(popped)
+    }
+
+    pub fn shrink_front(&mut self, width: usize) {
+        self.shift_left(width as u32);
+        self.shrink_back(width);
+    }
+
+    pub fn shrink_back(&mut self, width: usize) {
+        self.len -= width;
+        self.clear_remaining_bits();
+    }
+
+    pub fn find<const O: usize>(&self, other: &BitVec<O>) -> Option<usize> {
+        let mut clone = self.clone();
+
+        for i in 0..self.len {
+            if clone.len < other.len {
+                return None;
+            }
+            if &clone.bytes[..other.bytes.len()] == other.bytes {
+                return Some(i);
+            }
+            clone.pop_front::<1>(1);
+        }
+
+        None
     }
 
     pub fn get(&self, index: usize) -> Option<bool> {
@@ -185,6 +206,15 @@ impl<const C: usize> BitVec<C> {
         if remaining_bits > 0 {
             let mask = 0xFF << (8 - remaining_bits); // Mask to keep only the valid bits
             self.bytes[valid_bytes] &= mask;
+        }
+    }
+}
+
+impl From<Byte> for BitVec<1> {
+    fn from(value: Byte) -> Self {
+        Self {
+            len: 8,
+            bytes: [value.0],
         }
     }
 }
@@ -282,6 +312,22 @@ impl<const C: usize> Debug for BitVec<C> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{self}")
     }
+}
+
+#[test]
+fn bitvec_find() {
+    assert_eq!(
+        BitVec::from_bytes([0x00, 0xff], 16).find(&BitVec::from_bytes([0xff], 8)),
+        Some(8)
+    );
+    assert_eq!(
+        BitVec::from_bytes([0x0f, 0x0f], 16).find(&BitVec::from_bytes([0xf0], 8)),
+        Some(4)
+    );
+    assert_eq!(
+        BitVec::from_bytes([0x0f, 0b0111_1100], 16).find(&BitVec::from_bytes([0b1111_1000], 5)),
+        Some(9)
+    );
 }
 
 #[test]

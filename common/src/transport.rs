@@ -1,6 +1,7 @@
 use crate::bititer::Byte;
 use crate::bitvec::BitVec;
 use crate::device::Device;
+use crate::BitIter;
 
 // How many bits are sent at once
 const BIT_WIDTH: usize = 3;
@@ -36,8 +37,8 @@ impl TransportEncode {
         self.clock = !self.clock;
     }
 
-    pub fn push(&mut self, byte: &BitVec<1>) {
-        self.data.push_front(byte)
+    pub fn push(&mut self, data: &impl BitIter) -> bool {
+        self.data.push_front(data)
     }
 
     pub fn amount_bits_remaining(&self) -> usize {
@@ -58,12 +59,12 @@ fn encode() {
     let mut device = TestDevice {};
 
     let mut encoder = TransportEncode::new();
-    encoder.push(&BitVec::from(&Byte(0xff)));
+    encoder.push(&Byte(0xff));
     encoder.poll(&mut device);
     encoder.poll(&mut device);
     dbg!(&encoder.data);
     for byte in [0xf0; 4] {
-        encoder.push(&BitVec::from(&Byte(byte)));
+        encoder.push(&Byte(byte));
         dbg!(&encoder.data);
     }
     assert_eq!(

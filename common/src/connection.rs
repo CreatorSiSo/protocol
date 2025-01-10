@@ -24,26 +24,20 @@ fn log(str: &'static str) {
 }
 
 pub struct MirrorConnection<D: Device> {
-    output_state: OutputState,
-    encoder: TransportEncode,
-    input_state: InputState,
-    decoder: TransportDecode,
     device: D,
-    failures: u16,
-    successes: u8,
+    encoder: TransportEncode,
+    decoder: TransportDecode,
+    state: State,
     received: BitVec<64>,
 }
 
 impl<D: Device> MirrorConnection<D> {
     pub fn new(device: D) -> Self {
         Self {
-            output_state: OutputState::WaitingForFrame,
-            encoder: TransportEncode::new(),
-            input_state: InputState::WaitingForConnection,
-            decoder: TransportDecode::new(),
             device,
-            failures: 0,
-            successes: 0,
+            encoder: TransportEncode::new(),
+            decoder: TransportDecode::new(),
+            state: State::WaitingForConnection,
             received: BitVec::new(),
         }
     }
@@ -51,30 +45,24 @@ impl<D: Device> MirrorConnection<D> {
 
 impl<D: Device> Connection for MirrorConnection<D> {
     fn poll(&mut self) {
-        if self.input_state == InputState::WaitingForConnection {
-            self.encoder.establish_connection(&mut self.device);
+        dbg!(self.received);
 
-            let successful = self.decoder.establish_connection(&mut self.device);
-            if successful {
-                self.successes += 1;
-                self.failures = 0;
-                if self.successes > 10 {
-                    self.input_state_transition(InputState::WaitingForFrame);
-                }
-            } else {
-                self.successes = 0;
-                self.failures += 1;
-                if self.failures > 3000 {
-                    panic!("Could not establish connection");
-                }
+        if self.state == State::WaitingForConnection {
+            let connection_sync_bytes = [0xf0, 0x56];
+            let connection_sync_bitvec =
+                BitVec::from_bytes(connection_sync_bytes, connection_sync_bytes.len() * 8);
+
+            if let Some(bits_infront) = self.received.find(&connection_sync_bitvec) {
+                self.received
+                    .shrink_front(bits_infront + connection_sync_bitvec.len());
+                self.state_transition(State::SendingAndReceiving);
+                return;
             }
 
-            return;
-        }
-
-        if let Some(byte) = self.received.pop_front(8) {
+            self.encoder.push(&connection_sync_bitvec);
+        } else if let Some(byte) = self.received.pop_front::<1>(8) {
             self.encoder.push(&byte);
-        }
+        };
 
         self.encoder.poll(&mut self.device);
         self.decoder.poll(&mut self.device);
@@ -84,66 +72,38 @@ impl<D: Device> Connection for MirrorConnection<D> {
         }
     }
 
-    fn input_state_mut(&mut self) -> &mut InputState {
-        &mut self.input_state
-    }
-
-    fn output_state_mut(&mut self) -> &mut OutputState {
-        &mut self.output_state
+    fn state_mut(&mut self) -> &mut State {
+        &mut self.state
     }
 }
 
 pub trait Connection {
     fn poll(&mut self);
-    fn input_state_mut(&mut self) -> &mut InputState;
-    fn output_state_mut(&mut self) -> &mut OutputState;
+    fn state_mut(&mut self) -> &mut State;
 
-    fn input_state_transition(&mut self, next: InputState) {
-        use InputState::*;
-        let state = self.input_state_mut();
+    fn state_transition(&mut self, next: State) {
+        use State::*;
+        let state = self.state_mut();
 
         dbg!((&state, &next));
 
         match (&state, &next) {
-            (WaitingForConnection, WaitingForFrame) => log("=== Input: Established connection ==="),
-            (ReadingFrame, WaitingForFrame) => log("=== Input: Waiting for frame ==="),
-            (WaitingForFrame, ReadingFrame) => log("=== Input: Reading frame ==="),
-            (ReadingFrame, ReadingFrame)
-            | (WaitingForConnection, WaitingForConnection)
-            | (WaitingForConnection, ReadingFrame)
-            | (WaitingForFrame, WaitingForConnection)
-            | (WaitingForFrame, WaitingForFrame)
-            | (ReadingFrame, WaitingForConnection) => unreachable!(),
-        }
-
-        *state = next;
-    }
-
-    fn output_state_transition(&mut self, next: OutputState) {
-        use OutputState::*;
-        let state = self.output_state_mut();
-
-        match (&state, &next) {
-            (WaitingForFrame, WritingFrame) => log("=== Output: Writing frame ==="),
-            (WritingFrame, WaitingForFrame) => log("=== Output: Waiting for frame ==="),
-            (WaitingForFrame, WaitingForFrame) | (WritingFrame, WritingFrame) => unreachable!(),
+            (WaitingForConnection, SendingAndReceiving) => log("== Established connection =="),
+            (SendingAndReceiving, OnlySending) => log("== Done receiving =="),
+            (SendingAndReceiving, OnlyReceiving) => log("== Done sending =="),
+            _ => unreachable!(),
         }
 
         *state = next;
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum OutputState {
-    WaitingForFrame,
-    WritingFrame,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum InputState {
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum State {
     WaitingForConnection,
-    WaitingForFrame,
-    ReadingFrame,
+    SendingAndReceiving,
+    OnlySending,
+    OnlyReceiving,
 }
 
 #[derive(PartialEq, Eq)]
@@ -162,7 +122,7 @@ impl core::fmt::Debug for Command {
         match self {
             Self::Received(arg0) => f
                 .debug_tuple("Received")
-                .field(&debug_bytes_hex(arg0))
+                // .field(&debug_bytes_hex(arg0))
                 .finish(),
             Self::SendNextFrame => f.write_str("SendNextFrame"),
             Self::ResendLastFrame => f.write_str("ResendLastFrame"),
@@ -170,30 +130,6 @@ impl core::fmt::Debug for Command {
             Self::None => f.write_str("None"),
         }
     }
-}
-
-#[cfg(not(target_arch = "avr"))]
-fn debug_bytes_hex(bytes: &[u8]) -> String {
-    let mut result = bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .zip(core::iter::repeat(", "))
-        .fold(String::from("["), |accum, (l, r)| accum + &l + r);
-    result.pop();
-    result.pop();
-    result + "]"
-}
-
-#[cfg(not(target_arch = "avr"))]
-fn debug_bytes_binary(bytes: &[u8]) -> String {
-    let mut result = bytes
-        .iter()
-        .map(|byte| format!("{byte:08b}"))
-        .zip(core::iter::repeat(", "))
-        .fold(String::from("["), |accum, (l, r)| accum + &l + r);
-    result.pop();
-    result.pop();
-    result + "]"
 }
 
 // pub struct InputStream {
