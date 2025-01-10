@@ -15,71 +15,50 @@ pub use bititer::BitIter;
 mod bitvec;
 pub use bitvec::BitVec;
 
+mod indexmap;
+pub use indexmap::IndexMap;
+
 mod connection;
 pub use connection::{Connection, MirrorConnection};
 
-const ESCAPE_CODE_LEN: usize = 1;
 const CHECKSUM_LEN: usize = 0;
 const FRAME_DATA_LEN: usize = 64;
-const FRAME_LEN: usize = ESCAPE_CODE_LEN + FRAME_DATA_LEN + CHECKSUM_LEN + ESCAPE_CODE_LEN;
-pub type Frame = [u8; FRAME_LEN];
+const FRAME_LEN: usize = /* Escape code */ 8 + /* Index */ 8 + FRAME_DATA_LEN + CHECKSUM_LEN;
 
-/// # Steps
-///
-/// 1. calculate checksums
-/// 2. add start of frame
-/// 3. escape and add values
-/// 4. add checksums
-/// 5. add end of frame
-///
+#[derive(PartialEq, Eq)]
+pub struct Frame {
+    index: u8,
+    data: [u8; FRAME_DATA_LEN],
+    checksum: [u8; CHECKSUM_LEN],
+}
+
 /// ## Structure of frame
 ///
 /// - SOF
+/// - index
 /// - data
 /// - checksums
-/// - EOF
 ///
-/// ## Calculating checksums
-///
-/// TODO
-///
-/// ## Encoding values equal to escape codes
-///
-/// | Function               | Escape code | Escaped value  |
-/// | ---------------------- | ----------- | -------------- |
-/// | start of frame         | (SOF) 0x12  | 0x12 0x12      |
-/// | end of frame           | (EOF) 0x23  | 0x23 0x23      |
-/// | correct frame data     | (CDF) 0x34  | 0x34 0x34      |
-/// | incorrect frame data   | (IDF) 0x45  | 0x45 0x45      |
-/// | buffer                 | (BU)  0x56  | 0x56 0x56      |
-/// | finished sending       | (FS)  0x67  | 0x67 0x67      |
-///
-/// 0x56 0x65 0x9a 0x56
-/// 0x56      0x9a 0x56
-/// 0x56      0x65
-///
-fn encode_frame(data: &mut impl Iterator<Item = u8>) -> Frame {
-    let mut frame = [0; FRAME_LEN];
-    frame[0] = EscapeCode::StartOfFrame as u8;
+fn encode_frame(frame: Frame) -> [u8; FRAME_LEN] {
+    let mut bytes = [0; FRAME_LEN];
 
-    for cell in &mut frame[1..(1 + FRAME_DATA_LEN)] {
-        *cell = match data.next() {
-            Some(byte) => byte,
-            // TODO Send finished escape code
-            None => break,
-        }
-    }
+    bytes[0] = EscapeCode::StartOfFrame as u8;
+    bytes[1] = frame.index;
+    bytes[2..2 + FRAME_DATA_LEN].copy_from_slice(&frame.data);
+    bytes[2 + FRAME_DATA_LEN..].copy_from_slice(&frame.checksum);
 
-    // TODO Encode chucksums
-
-    frame[FRAME_LEN - 1] = EscapeCode::EndOfFrame as u8;
-
-    frame
+    bytes
 }
 
-/// 1. calculate checksums for received data
-/// 2. compare checksums
-///
-fn decode_frame(frame: &[u8; FRAME_DATA_LEN + CHECKSUM_LEN]) -> &[u8] {
+fn decode_frame(bytes: &[u8; FRAME_LEN]) -> Frame {
+    let mut frame = Frame {
+        index: bytes[1],
+        data: [0; FRAME_DATA_LEN],
+        checksum: [0; CHECKSUM_LEN],
+    };
+
+    frame.data.copy_from_slice(&bytes[2..2 + FRAME_DATA_LEN]);
+    frame.checksum.copy_from_slice(&bytes[2 + FRAME_DATA_LEN..]);
+
     frame
 }
