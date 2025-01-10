@@ -51,13 +51,13 @@ impl<const C: usize> BitVec<C> {
         false
     }
 
-    pub fn push_back(&mut self, other: &impl BitIter) {
+    pub fn push_back(&mut self, other: &impl BitIter) -> bool {
         let iter = other.iter();
         let iter_len = iter.len();
 
         // Ensure there is enough capacity to add the other BitVec
         if self.len + iter.len() > (C * 8) {
-            panic!("Not enough capacity");
+            return true;
         }
 
         for (bit, i) in iter.zip(self.len..) {
@@ -65,6 +65,7 @@ impl<const C: usize> BitVec<C> {
         }
 
         self.len += iter_len;
+        false
     }
 
     pub fn pop_front<const R: usize>(&mut self, width: usize) -> Option<BitVec<R>> {

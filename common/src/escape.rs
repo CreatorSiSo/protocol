@@ -1,77 +1,42 @@
+use crate::{bititer::Byte, BitVec};
+
 #[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum EscapeCode {
+    // SNC
+    Sync = 0xf1,
     /// SOF
     StartOfFrame = 0x12,
     /// EOF
     EndOfFrame = 0x23,
-    /// CFD
-    CorrectFrameData = 0x34,
-    /// IFD
-    IncorrectFrameData = 0x45,
-    // BU1
-    Buffer1 = 0x56,
-    // BU2
-    Buffer2 = 0x65,
+    /// ACK
+    Ack = 0x34,
+    /// NCK
+    Nack = 0x45,
     // FS
     FinishedSending = 0x67,
 }
 
 impl EscapeCode {
-    const VALUES: [u8; 7] = [
-        Self::StartOfFrame as u8,
-        Self::EndOfFrame as u8,
-        Self::CorrectFrameData as u8,
-        Self::IncorrectFrameData as u8,
-        Self::Buffer1 as u8,
-        Self::Buffer2 as u8,
-        Self::FinishedSending as u8,
+    const VALUES: [(EscapeCode, u8); 6] = [
+        (Self::Sync, Self::Sync as u8),
+        (Self::StartOfFrame, Self::StartOfFrame as u8),
+        (Self::EndOfFrame, Self::EndOfFrame as u8),
+        (Self::Ack, Self::Ack as u8),
+        (Self::Nack, Self::Nack as u8),
+        (Self::FinishedSending, Self::FinishedSending as u8),
     ];
 
+    pub fn all() -> impl Iterator<Item = (Self, BitVec<1>)> {
+        Self::VALUES
+            .into_iter()
+            .map(|(code, byte)| (code, BitVec::from(Byte(byte))))
+    }
+
     pub fn from_byte(byte: u8) -> Option<Self> {
-        Self::VALUES.contains(&byte).then_some(
+        Self::VALUES.into_iter().any(|(_, b)| b == byte).then_some(
             /* SAFETY: byte is a valid escape code */
             unsafe { core::mem::transmute(byte) },
         )
-    }
-}
-
-pub struct Escaped<I: Iterator<Item = u8>> {
-    bytes: I,
-    /// Second half of an escaped value
-    escape: Option<u8>,
-    done: bool,
-}
-
-impl<I: Iterator<Item = u8>> Escaped<I> {
-    pub fn new(bytes: I) -> Self {
-        Self {
-            bytes,
-            escape: None,
-            done: false,
-        }
-    }
-
-    pub fn is_done(&self) -> bool {
-        self.done
-    }
-}
-
-impl<I: Iterator<Item = u8>> Iterator for Escaped<I> {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(byte) = self.escape.take() {
-            return Some(byte);
-        }
-
-        let result = self.bytes.next().inspect(|byte| {
-            // Repeat value of escape code to escape it
-            if EscapeCode::VALUES.contains(&byte) {
-                self.escape = Some(*byte);
-            }
-        });
-        self.done = result.is_some();
-        result
     }
 }

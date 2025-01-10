@@ -1,3 +1,5 @@
+use core::fmt::Debug;
+
 pub struct IndexMap<T: Copy> {
     data: [T; 256],
     vacant: [bool; 256],
@@ -52,6 +54,22 @@ impl<T: Copy> IndexMap<T> {
         } else {
             None
         }
+    }
+}
+
+impl<T: Copy + Debug> Debug for IndexMap<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_list()
+            .entries(
+                self.data
+                    .iter()
+                    .enumerate()
+                    .zip(self.age.iter())
+                    .zip(self.vacant.iter())
+                    .filter(|(_, vacant)| **vacant)
+                    .map(|(((index, data), age), _)| (index, age, data)),
+            )
+            .finish()
     }
 }
 

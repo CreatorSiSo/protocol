@@ -20,6 +20,7 @@ impl<const N: usize> BitIter for [bool; N] {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub struct Byte(pub u8);
 
 impl BitIter for Byte {
