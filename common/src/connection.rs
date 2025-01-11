@@ -64,15 +64,21 @@ impl<D: Device> Connection<D> {
             }
         }
 
-        if self.counter % 3 == 0 {
-            // if self.state == State::OnlySending || self.state == State::SendingAndReceiving {
-            //     if let Some(data) = self.to_be_sent {
-            //         if let Some(frame) = self.sent.try_insert(|index| Frame::new(index, data)) {
-            //             self.encoder.send_frame(frame);
-            //             self.to_be_sent = None;
-            //         }
-            //     }
-            // }
+        if self.counter % 4 == 0 {
+            if self.encoder.needs_data()
+                && (self.state == State::OnlySending || self.state == State::SendingAndReceiving)
+            {
+                if let FrameData::Full(data) | FrameData::Last(data, _) = self.to_be_sent {
+                    if let Some(frame) = self.sent.try_insert(|index| Frame::new(index, data)) {
+                        dbg!(frame);
+                        #[cfg(target_arch = "avr")]
+                        ufmt::uwriteln!(self.device.serial(), "{:?}\r", frame).unwrap();
+
+                        self.encoder.send_frame(frame);
+                        self.to_be_sent = FrameData::None;
+                    }
+                }
+            }
 
             if self.encoder.needs_data() {
                 self.encoder.send_noop();
@@ -82,10 +88,10 @@ impl<D: Device> Connection<D> {
 
         let command = self.decoder.poll(&mut self.device);
 
-        #[cfg(target_arch = "avr")]
-        ufmt::uwriteln!(self.device.serial(), "cmd {:?}\r", command).unwrap();
-        #[cfg(not(target_arch = "avr"))]
-        eprintln!("cmd {:?}", command);
+        // #[cfg(target_arch = "avr")]
+        // ufmt::uwriteln!(self.device.serial(), "cmd {:?}\r", command).unwrap();
+        // #[cfg(not(target_arch = "avr"))]
+        // eprintln!("cmd {:?}", command);
 
         match command {
             Command::SyncReq => {

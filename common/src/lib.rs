@@ -21,6 +21,7 @@ pub use indexmap::IndexMap;
 
 mod connection;
 pub use connection::Connection;
+use ufmt::uwrite;
 
 const CHECKSUM_LEN: usize = 0;
 pub const FRAME_DATA_LEN: usize = 64;
@@ -90,6 +91,19 @@ impl Frame {
 
     fn checksum(_index: u8, _data: &[u8; FRAME_DATA_LEN]) -> [u8; CHECKSUM_LEN] {
         [0; 0]
+    }
+}
+
+impl ufmt::uDebug for Frame {
+    fn fmt<W>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error>
+    where
+        W: ufmt::uWrite + ?Sized,
+    {
+        uwrite!(f, "Frame({})[ ", self.index)?;
+        for byte in self.data {
+            uwrite!(f, "{:x} ", byte)?;
+        }
+        uwrite!(f, "]")
     }
 }
 
