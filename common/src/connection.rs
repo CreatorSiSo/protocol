@@ -45,11 +45,10 @@ impl<D: Device> Connection<D> {
         }
     }
 
-    pub fn send(&mut self, data: [u8; FRAME_DATA_LEN]) -> bool {
+    pub fn send(&mut self, mut f: impl FnMut() -> [u8; FRAME_DATA_LEN]) {
         if self.to_be_sent.is_none() {
-            self.to_be_sent = Some(data);
+            self.to_be_sent = Some(f());
         }
-        self.to_be_sent.is_some()
     }
 
     pub fn receive(&mut self) -> Option<[u8; FRAME_DATA_LEN]> {

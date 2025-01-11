@@ -96,15 +96,17 @@ impl MirrorConnection {
 
     fn poll(&mut self) {
         if self.len > 0 {
-            let mut data = [0; FRAME_DATA_LEN];
-            data.copy_from_slice(&self.received[..FRAME_DATA_LEN]);
+            self.connection.send(|| {
+                let mut data = [0; FRAME_DATA_LEN];
+                data.copy_from_slice(&self.received[..FRAME_DATA_LEN]);
 
-            if self.connection.send(data) {
                 let mut new = [0; RECEIVED_LEN];
                 new[..self.len - FRAME_DATA_LEN]
                     .copy_from_slice(&self.received[FRAME_DATA_LEN..self.len]);
                 self.received = new;
-            }
+
+                data
+            });
         }
 
         if let Some(data) = self.connection.receive() {
