@@ -21,7 +21,7 @@ impl B15fDevice {
 
 impl Device for B15fDevice {
     fn read(&mut self) -> BitVec<1> {
-        BitVec::from_bytes([self.driver.get_register_pina() << 4], 4)
+        BitVec::from_bytes([self.driver.get_register_pina().reverse_bits()], 4)
     }
 
     fn write(&mut self, data: BitVec<1>) {
@@ -39,16 +39,16 @@ fn main() -> Result<(), &'static str> {
     loop {
         let now = Instant::now();
         connection.poll();
-        if let Some(data) = connection.receive() {
-            stdout.write_all(&data).unwrap();
-        }
-        connection.send(|| {
-            let mut data = [0; FRAME_DATA_LEN];
-            // TODO EOF
-            stdin.read_exact(&mut data).unwrap();
-            data
-        });
-        thread::sleep(Duration::from_millis(100) - now.elapsed());
-        println!("Actual loop time: {}ms", now.elapsed().as_millis());
+        // if let Some(data) = connection.receive() {
+        //     stdout.write_all(&data).unwrap();
+        // }
+        // connection.send(|| {
+        //     let mut data = [0; FRAME_DATA_LEN];
+        //     // TODO EOF
+        //     stdin.read_exact(&mut data).unwrap();
+        //     data
+        // });
+        thread::sleep(Duration::from_millis(30).saturating_sub(now.elapsed()));
+        // println!("Actual loop time: {}ms", now.elapsed().as_millis());
     }
 }

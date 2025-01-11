@@ -35,6 +35,9 @@ impl Encoder {
     }
 
     pub fn poll(&mut self, device: &mut impl Device) {
+        // #[cfg(target_arch = "avr")]
+        // ufmt::uwriteln!(device.serial(), "encode {}\r", self.data).unwrap();
+
         // Concat clock and data into the nibble to be sent
         let Some(mut data) = self.data.pop_front::<1>(BIT_WIDTH) else {
             return;
@@ -145,10 +148,14 @@ impl Decoder {
     // Tries to read data and decode from the cable
     pub fn poll(&mut self, device: &mut impl Device) -> Command {
         let mut next = device.read();
-        if next.get(0).unwrap() == self.last.get(0).unwrap() {
+        if next == self.last {
             // Clock has not changed since last read
             return Command::None;
         }
+        // dbg!(next);
+        // #[cfg(target_arch = "avr")]
+        // ufmt::uwriteln!(device.serial(), "nibble {}\r", next).unwrap();
+
         self.last = next;
         next.shrink_front(1);
         self.data.push_back(&next);

@@ -1,20 +1,20 @@
 use crate::{bititer::Byte, BitVec};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, ufmt::derive::uDebug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum EscapeCode {
     // SRQ
-    SyncReq = 0b1111_0000,
+    SyncReq = 0b1111_0001,
     // SRS
-    SyncRes = 0b1000_0001,
+    SyncRes = 0b1000_0011,
     /// SOF
-    StartOfFrame = 0b1100_0011,
+    StartOfFrame = 0b1000_0101,
     /// ACK
-    Ack = 0b1010_0101,
+    Ack = 0b1000_1001,
     /// NCK
-    Nack = 0b1110_0111,
+    Nack = 0b1001_0001,
     // FS
-    Finished = 0b1011_1101,
+    Finished = 0b1010_0001,
     // NOP
     Noop = 0b0000_0000,
 }

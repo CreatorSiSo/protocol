@@ -57,17 +57,14 @@ impl Device for ArduinoDevice {
     fn read(&mut self) -> BitVec<1> {
         let mut result = BitVec::new();
         for pin in 6..=9 {
-            result.push_back(&self.get(pin));
+            result.push_front(&self.get(pin));
         }
-        // for bit in result.iter() {
-        //     ufmt::uwrite!(self.serial, "{}, ", if bit { 1 } else { 0 }).unwrap_infallible();
-        // }
-        // ufmt::uwriteln!(self.serial, "\r").unwrap_infallible();
+        // #[cfg(target_arch = "avr")]
+        // ufmt::uwriteln!(&mut self.serial, "read {}\r", result).unwrap();
         result
     }
 
     fn write(&mut self, data: BitVec<1>) {
-        // uwriteln!(&mut self.serial, "{}", data.get(0).unwrap()).unwrap();
         for (value, pin) in data.iter().zip(2..=5) {
             self.set(pin, value);
         }
@@ -138,7 +135,7 @@ fn main() -> ! {
     let mut led = pins.d13.into_output();
     loop {
         connection.poll();
-        arduino_hal::delay_ms(40);
+        arduino_hal::delay_ms(30);
         led.toggle();
     }
 }

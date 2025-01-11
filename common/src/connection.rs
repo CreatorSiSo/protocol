@@ -64,7 +64,7 @@ impl<D: Device> Connection<D> {
             }
         }
 
-        if self.counter % 4 == 0 {
+        if self.counter % 3 == 0 {
             // if self.state == State::OnlySending || self.state == State::SendingAndReceiving {
             //     if let Some(data) = self.to_be_sent {
             //         if let Some(frame) = self.sent.try_insert(|index| Frame::new(index, data)) {
@@ -82,12 +82,10 @@ impl<D: Device> Connection<D> {
 
         let command = self.decoder.poll(&mut self.device);
 
-        if command != Command::None {
-            #[cfg(target_arch = "avr")]
-            ufmt::uwriteln!(self.device.serial(), "{:?}\r", command).unwrap();
-            #[cfg(not(target_arch = "avr"))]
-            println!("{:?}", command);
-        }
+        #[cfg(target_arch = "avr")]
+        ufmt::uwriteln!(self.device.serial(), "cmd {:?}\r", command).unwrap();
+        #[cfg(not(target_arch = "avr"))]
+        eprintln!("cmd {:?}", command);
 
         match command {
             Command::SyncReq => {

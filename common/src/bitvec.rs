@@ -313,7 +313,7 @@ impl<const C: usize> Display for BitVec<C> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut bits = self.iter().map(|bit| if bit { 1 } else { 0 });
 
-        write!(f, "BitVec<{C}>[")?;
+        write!(f, "[")?;
         if let Some(bit) = bits.next() {
             write!(f, "{bit}")?;
         }
@@ -331,7 +331,7 @@ impl<const C: usize> ufmt::uDisplay for BitVec<C> {
     {
         let mut bits = self.iter().map(|bit| if bit { 1 } else { 0 });
 
-        ufmt::uwrite!(f, "{}", "BitVec<{C}>[")?;
+        ufmt::uwrite!(f, "{}", "[")?;
         if let Some(bit) = bits.next() {
             ufmt::uwrite!(f, "{}", bit)?;
         }
