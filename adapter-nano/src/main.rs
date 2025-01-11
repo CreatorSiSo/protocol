@@ -90,7 +90,7 @@ impl MirrorConnection {
         Self {
             received: [0; RECEIVED_LEN],
             len: 0,
-            connection: Connection::new(device, false),
+            connection: Connection::new(device),
         }
     }
 

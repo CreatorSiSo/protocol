@@ -25,7 +25,7 @@ pub use connection::Connection;
 const CHECKSUM_LEN: usize = 0;
 pub const FRAME_DATA_LEN: usize = 64;
 pub const FRAME_LEN: usize = /* Escape code */
-    8 + /* Index */ 8 + FRAME_DATA_LEN + CHECKSUM_LEN;
+    8 + /* Index */ 8 + FRAME_DATA_LEN + CHECKSUM_LEN + /* Noop */  1;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Frame {
@@ -65,6 +65,7 @@ impl Frame {
         bytes[1] = self.index;
         bytes[2..2 + FRAME_DATA_LEN].copy_from_slice(&self.data);
         // bytes[2 + FRAME_DATA_LEN..].copy_from_slice(&self.checksum);
+        bytes[FRAME_LEN - 1] = EscapeCode::Noop as u8;
 
         bytes
     }

@@ -3,25 +3,31 @@ use crate::{bititer::Byte, BitVec};
 #[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum EscapeCode {
-    // SNC
-    Sync = 0xf0,
+    // SRQ
+    SyncReq = 0b1111_0000,
+    // SRS
+    SyncRes = 0b1000_0001,
     /// SOF
-    StartOfFrame = 0x33,
+    StartOfFrame = 0b1100_0011,
     /// ACK
-    Ack = 0x44,
+    Ack = 0b1010_0101,
     /// NCK
-    Nack = 0x55,
+    Nack = 0b1110_0111,
     // FS
-    FinishedSending = 0x66,
+    Finished = 0b1011_1101,
+    // NOP
+    Noop = 0b0000_0000,
 }
 
 impl EscapeCode {
-    const VALUES: [(EscapeCode, u8); 5] = [
-        (Self::Sync, Self::Sync as u8),
+    const VALUES: [(EscapeCode, u8); 7] = [
         (Self::StartOfFrame, Self::StartOfFrame as u8),
         (Self::Ack, Self::Ack as u8),
         (Self::Nack, Self::Nack as u8),
-        (Self::FinishedSending, Self::FinishedSending as u8),
+        (Self::SyncReq, Self::SyncReq as u8),
+        (Self::SyncRes, Self::SyncRes as u8),
+        (Self::Finished, Self::Finished as u8),
+        (Self::Noop, Self::Noop as u8),
     ];
 
     pub fn all() -> impl Iterator<Item = (Self, BitVec<1>)> {

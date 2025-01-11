@@ -46,8 +46,12 @@ impl Encoder {
         self.clock = !self.clock;
     }
 
-    pub fn send_sync(&mut self) {
-        self.send_bytes([EscapeCode::Sync as u8])
+    pub fn send_sync_req(&mut self) {
+        self.send_bytes([EscapeCode::SyncReq as u8, EscapeCode::Noop as u8])
+    }
+
+    pub fn send_sync_res(&mut self) {
+        self.send_bytes([EscapeCode::SyncRes as u8, EscapeCode::Noop as u8])
     }
 
     pub fn send_frame(&mut self, frame: &Frame) {
@@ -55,19 +59,27 @@ impl Encoder {
     }
 
     pub fn send_ack(&mut self, index: u8) {
-        self.send_bytes([EscapeCode::Ack as u8, index])
+        self.send_bytes([EscapeCode::Ack as u8, index, EscapeCode::Noop as u8])
     }
 
     pub fn send_nack(&mut self, index: u8) {
-        self.send_bytes([EscapeCode::Nack as u8, index])
+        self.send_bytes([EscapeCode::Nack as u8, index, EscapeCode::Noop as u8])
     }
 
     pub fn send_finished(&mut self) {
-        self.send_bytes([EscapeCode::FinishedSending as u8])
+        self.send_bytes([EscapeCode::Finished as u8, EscapeCode::Noop as u8])
+    }
+
+    pub fn send_noop(&mut self) {
+        self.send_bytes([EscapeCode::Noop as u8])
     }
 
     pub fn clear(&mut self) {
         self.data.clear();
+    }
+
+    pub fn needs_data(&self) -> bool {
+        self.data.len() < 3
     }
 
     fn send_bytes<const N: usize>(&mut self, bytes: [u8; N]) {
@@ -91,10 +103,10 @@ fn encode() {
     let mut device = TestDevice {};
 
     let mut encoder = Encoder::new();
-    encoder.send_sync();
+    encoder.send_sync_req();
     assert_eq!(
         encoder.data,
-        BitVec::from_bytes([EscapeCode::Sync as u8], 8),
+        BitVec::from_bytes([EscapeCode::SyncReq as u8], 8),
     );
     encoder.poll(&mut device);
     encoder.poll(&mut device);
@@ -148,9 +160,18 @@ impl Decoder {
             self.data.shrink_front(width);
 
             let maybe_command = match code {
-                EscapeCode::Sync => {
+                code @ (EscapeCode::Noop
+                | EscapeCode::SyncReq
+                | EscapeCode::SyncRes
+                | EscapeCode::Finished) => {
                     self.data.shrink_front(8);
-                    Some(Command::Sync)
+                    match code {
+                        EscapeCode::SyncReq => Some(Command::SyncReq),
+                        EscapeCode::SyncRes => Some(Command::SyncRes),
+                        EscapeCode::Finished => Some(Command::Finished),
+                        EscapeCode::Noop => None,
+                        _ => unreachable!(),
+                    }
                 }
                 EscapeCode::StartOfFrame => self
                     .data
@@ -164,10 +185,6 @@ impl Decoder {
                     .data
                     .pop_front::<1>(8)
                     .map(|index| Command::Nack(index.bytes()[0])),
-                EscapeCode::FinishedSending => {
-                    self.data.shrink_front(8);
-                    Some(Command::Sync)
-                }
             };
 
             if let Some(command) = maybe_command {
@@ -208,7 +225,10 @@ fn decode() {
     }
 
     let mut data = BitVec::new();
-    data.push_back(&BitVec::from_bytes([0, EscapeCode::Sync as u8, 0], 3 * 8));
+    data.push_back(&BitVec::from_bytes(
+        [0, EscapeCode::SyncReq as u8, 0],
+        3 * 8,
+    ));
     data.push_back(&BitVec::from_bytes(
         Frame::empty_invalid().encode(),
         FRAME_LEN * 8,
@@ -224,7 +244,7 @@ fn decode() {
     assert_eq!(decoder.poll(&mut device), Command::None);
     assert_eq!(decoder.poll(&mut device), Command::None);
     assert_eq!(decoder.data.len(), 15);
-    assert_eq!(decoder.poll(&mut device), Command::Sync);
+    assert_eq!(decoder.poll(&mut device), Command::SyncReq);
     assert_eq!(decoder.data.len(), 2);
     assert_eq!(decoder.poll(&mut device), Command::None);
     assert_eq!(decoder.poll(&mut device), Command::None);
@@ -240,7 +260,8 @@ fn decode() {
 
 #[derive(PartialEq, Eq)]
 pub enum Command {
-    Sync,
+    SyncReq,
+    SyncRes,
     Frame(Frame),
     Ack(u8),
     Nack(u8),
@@ -254,7 +275,8 @@ impl ufmt::uDebug for Command {
         W: ufmt::uWrite + ?Sized,
     {
         match self {
-            Self::Sync => ufmt::uwrite!(f, "Sync"),
+            Self::SyncReq => ufmt::uwrite!(f, "SyncReq"),
+            Self::SyncRes => ufmt::uwrite!(f, "SyncRes"),
             Self::Frame(arg0) => f
                 .debug_tuple("Frame")? /* .field(arg0)? */
                 .finish(),
@@ -270,7 +292,8 @@ impl ufmt::uDebug for Command {
 impl core::fmt::Debug for Command {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Sync => write!(f, "SyncReq"),
+            Self::SyncReq => write!(f, "SyncReq"),
+            Self::SyncRes => write!(f, "SyncRes"),
             Self::Frame(arg0) => f.debug_tuple("Frame").field(arg0).finish(),
             Self::Ack(arg0) => f.debug_tuple("Ack").field(arg0).finish(),
             Self::Nack(arg0) => f.debug_tuple("Nack").field(arg0).finish(),

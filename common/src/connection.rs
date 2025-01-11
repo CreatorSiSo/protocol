@@ -17,9 +17,9 @@ macro_rules! dbg {
 }
 
 pub struct Connection<D: Device> {
-    is_controller: bool,
     device: D,
     counter: u32,
+    sync_requests: u16,
     state: State,
     encoder: Encoder,
     decoder: Decoder,
@@ -30,11 +30,11 @@ pub struct Connection<D: Device> {
 }
 
 impl<D: Device> Connection<D> {
-    pub fn new(device: D, is_controller: bool) -> Self {
+    pub fn new(device: D) -> Self {
         Self {
-            is_controller,
             device,
             counter: 0,
+            sync_requests: 0,
             state: State::WaitingForConnection,
             encoder: Encoder::new(),
             decoder: Decoder::new(),
@@ -57,8 +57,12 @@ impl<D: Device> Connection<D> {
     }
 
     pub fn poll(&mut self) {
-        if self.counter % 32 == 0 && self.state == State::WaitingForConnection {
-            self.encoder.send_sync();
+        if self.counter % 16 == 0 && self.state == State::WaitingForConnection {
+            if self.sync_requests >= 10 {
+                self.encoder.send_sync_res();
+            } else {
+                self.encoder.send_sync_req()
+            }
         }
 
         if self.counter % 4 == 0 {
@@ -71,27 +75,29 @@ impl<D: Device> Connection<D> {
             //     }
             // }
 
+            if self.encoder.needs_data() {
+                self.encoder.send_noop();
+            }
             self.encoder.poll(&mut self.device);
         }
 
         let command = self.decoder.poll(&mut self.device);
 
-        #[cfg(target_arch = "avr")]
-        ufmt::uwriteln!(self.device.serial(), "{:?}\r", command).unwrap();
-        #[cfg(not(target_arch = "avr"))]
-        println!("{:?}", command);
+        if command != Command::None {
+            #[cfg(target_arch = "avr")]
+            ufmt::uwriteln!(self.device.serial(), "{:?}\r", command).unwrap();
+            #[cfg(not(target_arch = "avr"))]
+            println!("{:?}", command);
+        }
 
         match command {
-            Command::Sync => {
+            Command::SyncReq => {
                 // #[cfg(target_arch = "avr")]
                 // ufmt::uwriteln!(self.device.serial(), "Sync requested").unwrap();
-
-                if self.is_controller {
-                    self.state_transition(State::SendingAndReceiving);
-                } else {
-                    self.encoder.send_sync();
-                    self.state_transition(State::SendingAndReceiving);
-                }
+                self.sync_requests += 1;
+            }
+            Command::SyncRes => {
+                self.state_transition(State::SendingAndReceiving);
             }
 
             Command::Frame(frame) if frame.is_valid() => {
@@ -120,7 +126,8 @@ impl<D: Device> Connection<D> {
 
     fn state_transition(&mut self, next: State) {
         use State::*;
-        dbg!((self.state, next));
+        #[cfg(not(target_arch = "avr"))]
+        eprintln!("{:?}", (self.state, next));
 
         #[cfg(target_arch = "avr")]
         let mut log = |str| ufmt::uwrite!(self.device.serial(), "{}\r", str).unwrap();
@@ -131,10 +138,10 @@ impl<D: Device> Connection<D> {
         };
 
         match (self.state, next) {
-            (WaitingForConnection, SendingAndReceiving) => log("== Established connection =="),
-            (SendingAndReceiving, SendingAndReceiving) => log("== Reestablished connection =="),
-            (SendingAndReceiving, OnlySending) => log("== Done receiving =="),
-            (SendingAndReceiving, OnlyReceiving) => log("== Done sending =="),
+            (WaitingForConnection, SendingAndReceiving) => log("=> Established connection"),
+            (SendingAndReceiving, SendingAndReceiving) => log("=> Reestablished connection"),
+            (SendingAndReceiving, OnlySending) => log("=> Done receiving"),
+            (SendingAndReceiving, OnlyReceiving) => log("=> Done sending"),
             _ => unreachable!(),
         }
 

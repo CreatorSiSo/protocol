@@ -31,7 +31,7 @@ fn main() -> Result<(), &'static str> {
     // let input = fs::read("./data/random-256.bin").unwrap();
 
     let device = B15fDevice::new()?;
-    let mut connection = Connection::new(device, true);
+    let mut connection = Connection::new(device);
 
     loop {
         // let now = Instant::now();
