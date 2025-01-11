@@ -1,7 +1,6 @@
 use b15f::{B15f, B15fDriver};
 use common::{BitVec, Connection, Device, FRAME_DATA_LEN, FrameData};
 use std::{
-    fs::read,
     io::{ErrorKind, Read, Write, stdin, stdout},
     thread,
     time::{Duration, Instant},
@@ -41,6 +40,7 @@ fn main() -> Result<(), &'static str> {
     loop {
         let now = Instant::now();
         connection.poll();
+
         if let FrameData::Full(data) | FrameData::Last(data, _) = connection.receive() {
             stdout.write_all(&data).unwrap();
         }
@@ -60,6 +60,7 @@ fn main() -> Result<(), &'static str> {
                 Result::Err(kind) => panic!("{}", kind),
             }
         });
+
         thread::sleep(Duration::from_millis(30).saturating_sub(now.elapsed()));
         // println!("Actual loop time: {}ms", now.elapsed().as_millis());
     }
