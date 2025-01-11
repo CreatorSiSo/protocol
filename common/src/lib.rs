@@ -92,3 +92,17 @@ impl Frame {
         [0; 0]
     }
 }
+
+#[derive(Debug, Default)]
+pub enum FrameData {
+    Full([u8; FRAME_DATA_LEN]),
+    Last([u8; FRAME_DATA_LEN], u8),
+    #[default]
+    None,
+}
+
+impl FrameData {
+    pub fn take(&mut self) -> Self {
+        core::mem::take(self)
+    }
+}

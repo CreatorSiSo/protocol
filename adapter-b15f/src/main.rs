@@ -1,7 +1,8 @@
 use b15f::{B15f, B15fDriver};
-use common::{BitVec, Connection, Device, FRAME_DATA_LEN};
+use common::{BitVec, Connection, Device, FRAME_DATA_LEN, FrameData};
 use std::{
-    io::{Read, Write, stdin, stdout},
+    fs::read,
+    io::{ErrorKind, Read, Write, stdin, stdout},
     thread,
     time::{Duration, Instant},
 };
@@ -30,6 +31,7 @@ impl Device for B15fDevice {
 }
 
 fn main() -> Result<(), &'static str> {
+    let mut reading = true;
     let mut stdin = stdin().lock();
     let mut stdout = stdout().lock();
 
@@ -39,14 +41,24 @@ fn main() -> Result<(), &'static str> {
     loop {
         let now = Instant::now();
         connection.poll();
-        // if let Some(data) = connection.receive() {
+        // if let FrameData::Full(data) | FrameData::Last(data, _) = connection.receive() {
         //     stdout.write_all(&data).unwrap();
         // }
         // connection.send(|| {
         //     let mut data = [0; FRAME_DATA_LEN];
-        //     // TODO EOF
-        //     stdin.read_exact(&mut data).unwrap();
-        //     data
+        //     match stdin.read_exact(&mut data).map_err(|err| err.kind()) {
+        //         Result::Ok(..) => FrameData::Full(data),
+        //         Result::Err(ErrorKind::UnexpectedEof) => {
+        //             if reading {
+        //                 let len = stdin.read(&mut data).unwrap();
+        //                 reading = false;
+        //                 FrameData::Last(data, len as u8)
+        //             } else {
+        //                 FrameData::None
+        //             }
+        //         }
+        //         Result::Err(kind) => panic!("{}", kind),
+        //     }
         // });
         thread::sleep(Duration::from_millis(30).saturating_sub(now.elapsed()));
         // println!("Actual loop time: {}ms", now.elapsed().as_millis());
