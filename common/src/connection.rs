@@ -87,7 +87,7 @@ impl<D: Device> Connection<D> {
 
             Command::Frame(frame) if frame.is_valid() => {
                 self.received = frame;
-                self.encoder.send_ack(frame.index);
+                self.encoder.send_ack();
             }
             Command::Frame(frame) => {
                 // self.encoder.send_nack(frame.index);
@@ -120,7 +120,7 @@ impl<D: Device> Connection<D> {
     fn sending(&mut self) {
         if self.encoder.needs_data() {
             if let FrameData::Full(data) | FrameData::Last(data, _) = self.to_be_sent {
-                let frame = Frame::new(0, data);
+                let frame = Frame::new(data);
                 self.sent = frame;
                 dbg!(frame);
                 #[cfg(target_arch = "avr")]

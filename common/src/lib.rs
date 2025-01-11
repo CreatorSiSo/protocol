@@ -23,11 +23,10 @@ use ufmt::uwrite;
 const CHECKSUM_LEN: usize = 0;
 pub const FRAME_DATA_LEN: usize = 64;
 pub const FRAME_LEN: usize = /* Escape code */
-    8 + /* Index */ 8 + FRAME_DATA_LEN + CHECKSUM_LEN + /* Noop */  1;
+    8  + FRAME_DATA_LEN + CHECKSUM_LEN + /* Noop */  1;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Frame {
-    index: u8,
     data: [u8; FRAME_DATA_LEN],
     checksum: [u8; CHECKSUM_LEN],
 }
@@ -35,17 +34,15 @@ pub struct Frame {
 impl Frame {
     pub fn empty_invalid() -> Self {
         Self {
-            index: 0,
             data: [0; FRAME_DATA_LEN],
             checksum: [0; CHECKSUM_LEN],
         }
     }
 
-    pub fn new(index: u8, data: [u8; FRAME_DATA_LEN]) -> Self {
+    pub fn new(data: [u8; FRAME_DATA_LEN]) -> Self {
         Self {
-            index,
             data,
-            checksum: Self::checksum(index, &data),
+            checksum: Self::checksum(&data),
         }
     }
 
@@ -60,8 +57,7 @@ impl Frame {
         let mut bytes = [0; FRAME_LEN];
 
         bytes[0] = EscapeCode::StartOfFrame as u8;
-        bytes[1] = self.index;
-        bytes[2..2 + FRAME_DATA_LEN].copy_from_slice(&self.data);
+        bytes[1..1 + FRAME_DATA_LEN].copy_from_slice(&self.data);
         // bytes[2 + FRAME_DATA_LEN..].copy_from_slice(&self.checksum);
         bytes[FRAME_LEN - 1] = EscapeCode::Noop as u8;
 
@@ -70,12 +66,11 @@ impl Frame {
 
     pub fn decode(bytes: &[u8]) -> Self {
         let mut frame = Self {
-            index: bytes[1],
             data: [0; FRAME_DATA_LEN],
             checksum: [0; CHECKSUM_LEN],
         };
 
-        frame.data.copy_from_slice(&bytes[2..2 + FRAME_DATA_LEN]);
+        frame.data.copy_from_slice(&bytes[1..1 + FRAME_DATA_LEN]);
         // frame.checksum.copy_from_slice(&bytes[2 + FRAME_DATA_LEN..]);
 
         frame
@@ -86,7 +81,7 @@ impl Frame {
         todo!()
     }
 
-    fn checksum(_index: u8, _data: &[u8; FRAME_DATA_LEN]) -> [u8; CHECKSUM_LEN] {
+    fn checksum(_data: &[u8; FRAME_DATA_LEN]) -> [u8; CHECKSUM_LEN] {
         [0; 0]
     }
 }
@@ -96,7 +91,7 @@ impl ufmt::uDebug for Frame {
     where
         W: ufmt::uWrite + ?Sized,
     {
-        uwrite!(f, "Frame({})[ ", self.index)?;
+        uwrite!(f, "Frame[ ")?;
         for byte in self.data {
             uwrite!(f, "{:x} ", byte)?;
         }

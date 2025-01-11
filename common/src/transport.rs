@@ -61,12 +61,12 @@ impl Encoder {
         self.send_bytes(frame.encode())
     }
 
-    pub fn send_ack(&mut self, index: u8) {
-        self.send_bytes([EscapeCode::Ack as u8, index, EscapeCode::Noop as u8])
+    pub fn send_ack(&mut self) {
+        self.send_bytes([EscapeCode::Ack as u8, EscapeCode::Noop as u8])
     }
 
-    pub fn send_nack(&mut self, index: u8) {
-        self.send_bytes([EscapeCode::Nack as u8, index, EscapeCode::Noop as u8])
+    pub fn send_nack(&mut self) {
+        self.send_bytes([EscapeCode::Nack as u8, EscapeCode::Noop as u8])
     }
 
     pub fn send_finished(&mut self) {
@@ -123,7 +123,7 @@ fn encode() {
 
     assert_eq!(encoder.data, BitVec::from_bytes([0b0100_0000], 2));
 
-    encoder.send_ack(99);
+    encoder.send_ack();
     for _ in 0..(2 + 16) {
         encoder.poll(&mut device);
     }
