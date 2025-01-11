@@ -25,7 +25,7 @@ pub struct Connection<D: Device> {
     decoder: Decoder,
     next: Option<Frame>,
     received: Option<Frame>,
-    sent: Frame,
+    sent: Option<Frame>,
 }
 
 impl<D: Device> Connection<D> {
@@ -39,7 +39,7 @@ impl<D: Device> Connection<D> {
             decoder: Decoder::new(),
             next: None,
             received: None,
-            sent: Frame::empty_invalid(),
+            sent: None,
         }
     }
 
@@ -61,7 +61,7 @@ impl<D: Device> Connection<D> {
             State::OnlyReceiving => self.sending(),
         }
 
-        if self.counter % 4 == 0 {
+        if self.counter % 3 == 0 {
             if self.encoder.needs_data() {
                 self.encoder.send_noop();
             }
@@ -69,11 +69,6 @@ impl<D: Device> Connection<D> {
         }
 
         let command = self.decoder.poll(&mut self.device);
-
-        // #[cfg(target_arch = "avr")]
-        // ufmt::uwriteln!(self.device.serial(), "cmd {:?}\r", command).unwrap();
-        // #[cfg(not(target_arch = "avr"))]
-        // eprintln!("cmd {:?}", command);
 
         match command {
             Command::SyncReq => {
@@ -83,16 +78,22 @@ impl<D: Device> Connection<D> {
                 self.state_transition(State::SendingAndReceiving);
             }
 
-            Command::Frame(frame) if frame.is_valid() => {
-                self.received = Some(frame);
-                self.encoder.send_ack();
-            }
             Command::Frame(frame) => {
-                // self.encoder.send_nack(frame.index);
+                #[cfg(target_arch = "avr")]
+                ufmt::uwriteln!(self.device.serial(), "received {:?}\r", frame).unwrap();
+                #[cfg(not(target_arch = "avr"))]
+                eprintln!("received {:?}", frame);
+
+                if frame.is_valid() {
+                    self.received = Some(frame);
+                    self.encoder.send_ack();
+                } else {
+                    self.encoder.send_nack();
+                }
             }
 
             Command::Ack => {
-                // self.received.remove(index)
+                self.sent = None;
             }
             Command::Nack => {
                 // self.encoder.send_frame(self.received.get(index).unwrap())
@@ -106,8 +107,8 @@ impl<D: Device> Connection<D> {
     }
 
     fn waiting_for_connection(&mut self) {
-        if self.counter % 16 == 0 {
-            if self.sync_requests >= 10 {
+        if self.counter % 8 == 0 {
+            if self.sync_requests >= 5 {
                 self.encoder.send_sync_res();
             } else {
                 self.encoder.send_sync_req()
@@ -116,15 +117,16 @@ impl<D: Device> Connection<D> {
     }
 
     fn sending(&mut self) {
-        if self.encoder.needs_data() {
-            if let Some(frame) = self.next {
-                self.sent = frame;
-                dbg!(frame);
+        if self.encoder.needs_data() && self.sent.is_none() {
+            if let Some(frame) = self.next.take() {
+                self.sent = Some(frame);
+                #[cfg(not(target_arch = "avr"))]
+                eprintln!("sending {:?}\r", frame);
+
                 #[cfg(target_arch = "avr")]
-                ufmt::uwriteln!(self.device.serial(), "{:?}\r", frame).unwrap();
+                ufmt::uwriteln!(self.device.serial(), "sending {:?}\r", frame).unwrap();
 
                 self.encoder.send_frame(&frame);
-                self.next = None;
             }
         }
     }
@@ -133,13 +135,14 @@ impl<D: Device> Connection<D> {
         use State::*;
         #[cfg(not(target_arch = "avr"))]
         eprintln!("{:?}", (self.state, next));
+        #[cfg(target_arch = "avr")]
+        ufmt::uwrite!(self.device.serial(), "{:?}, {:?}\r", self.state, next).unwrap();
 
         #[cfg(target_arch = "avr")]
         let mut log = |str| ufmt::uwrite!(self.device.serial(), "{}\r", str).unwrap();
-
         #[cfg(not(target_arch = "avr"))]
         let log = |str: &'static str| {
-            println!("{}", str);
+            eprintln!("{}", str);
         };
 
         match (self.state, next) {
@@ -154,7 +157,7 @@ impl<D: Device> Connection<D> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(ufmt::derive::uDebug, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum State {
     WaitingForConnection,
     SendingAndReceiving,

@@ -152,9 +152,6 @@ impl Decoder {
             // Clock has not changed since last read
             return Command::None;
         }
-        // dbg!(next);
-        // #[cfg(target_arch = "avr")]
-        // ufmt::uwriteln!(device.serial(), "nibble {}\r", next).unwrap();
 
         self.last = next;
         next.shrink_front(1);
@@ -165,13 +162,6 @@ impl Decoder {
                 continue;
             };
             self.data.shrink_front(width);
-
-            let mut decode_with_number = || {
-                (self.data.len() >= (8 + 8)).then(|| {
-                    self.data.shrink_front(8);
-                    self.data.pop_front::<1>(8).unwrap().bytes()[0]
-                })
-            };
 
             let maybe_command = match code {
                 EscapeCode::SyncReq => {
@@ -201,13 +191,16 @@ impl Decoder {
                     Some(Command::Nack)
                 }
                 EscapeCode::Finished => {
-                    decode_with_number().map(|len| Command::Finished /* (len) */)
+                    self.data.shrink_front(8);
+                    Some(Command::Finished)
                 }
             };
 
-            if let Some(command) = maybe_command {
-                return command;
-            }
+            return if let Some(command) = maybe_command {
+                command
+            } else {
+                Command::None
+            };
         }
 
         Command::None

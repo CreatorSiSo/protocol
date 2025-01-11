@@ -62,6 +62,6 @@ fn main() -> Result<(), &'static str> {
         });
 
         thread::sleep(Duration::from_millis(30).saturating_sub(now.elapsed()));
-        // println!("Actual loop time: {}ms", now.elapsed().as_millis());
+        // eprintln!("Actual loop time: {}ms", now.elapsed().as_millis());
     }
 }

@@ -1,5 +1,4 @@
 #![cfg_attr(target_arch = "avr", no_std)]
-#![feature(concat_bytes)]
 
 mod transport;
 pub use transport::Encoder;
@@ -18,14 +17,14 @@ pub use bitvec::BitVec;
 
 mod connection;
 pub use connection::Connection;
-use ufmt::uwrite;
+use ufmt::{uwrite, uwriteln};
 
 const CHECKSUM_LEN: usize = 0;
 pub const FRAME_DATA_LEN: usize = 64;
 pub const FRAME_LEN: usize = /* Escape code */
     1 + /* Len */ 1 + FRAME_DATA_LEN + CHECKSUM_LEN + /* Noop */  1;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub struct Frame {
     pub len: u8,
     pub data: [u8; FRAME_DATA_LEN],
@@ -59,8 +58,8 @@ impl Frame {
     pub fn encode(&self) -> [u8; FRAME_LEN] {
         let mut bytes = [0; FRAME_LEN];
 
-        bytes[0] = self.len;
-        bytes[1] = EscapeCode::StartOfFrame as u8;
+        bytes[0] = EscapeCode::StartOfFrame as u8;
+        bytes[1] = self.len;
         bytes[2..2 + FRAME_DATA_LEN].copy_from_slice(&self.data);
         // bytes[2 + FRAME_DATA_LEN..].copy_from_slice(&self.checksum);
         bytes[FRAME_LEN - 1] = EscapeCode::Noop as u8;
@@ -83,11 +82,22 @@ impl Frame {
 
     // Check whether the checksum matches up with the data
     pub fn is_valid(&self) -> bool {
-        todo!()
+        // TODO
+        true
     }
 
     fn checksum(_data: &[u8; FRAME_DATA_LEN]) -> [u8; CHECKSUM_LEN] {
         [0; 0]
+    }
+}
+
+impl core::fmt::Debug for Frame {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Frame(len: {})[ ", self.len)?;
+        for byte in self.data {
+            write!(f, "{:x} ", byte)?;
+        }
+        write!(f, "]\n")
     }
 }
 
@@ -96,10 +106,10 @@ impl ufmt::uDebug for Frame {
     where
         W: ufmt::uWrite + ?Sized,
     {
-        uwrite!(f, "Frame[ ")?;
+        uwrite!(f, "Frame(len: {})[ ", self.len)?;
         for byte in self.data {
             uwrite!(f, "{:x} ", byte)?;
         }
-        uwrite!(f, "]")
+        uwriteln!(f, "]\r")
     }
 }

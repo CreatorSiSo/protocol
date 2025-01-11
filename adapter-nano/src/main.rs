@@ -73,7 +73,7 @@ impl Device for ArduinoDevice {
     }
 }
 
-const RECEIVED_LEN: usize = FRAME_DATA_LEN * 2;
+const RECEIVED_LEN: usize = FRAME_DATA_LEN * 4;
 
 struct MirrorConnection {
     received: [u8; RECEIVED_LEN],
