@@ -56,30 +56,14 @@ impl<D: Device> Connection<D> {
     }
 
     pub fn poll(&mut self) {
-        if self.counter % 16 == 0 && self.state == State::WaitingForConnection {
-            if self.sync_requests >= 10 {
-                self.encoder.send_sync_res();
-            } else {
-                self.encoder.send_sync_req()
-            }
+        match self.state {
+            State::WaitingForConnection => self.waiting_for_connection(),
+            State::SendingAndReceiving => self.sending(),
+            State::OnlySending => self.sending(),
+            State::OnlyReceiving => self.sending(),
         }
 
         if self.counter % 4 == 0 {
-            if self.encoder.needs_data()
-                && (self.state == State::OnlySending || self.state == State::SendingAndReceiving)
-            {
-                if let FrameData::Full(data) | FrameData::Last(data, _) = self.to_be_sent {
-                    if let Some(frame) = self.sent.try_insert(|index| Frame::new(index, data)) {
-                        dbg!(frame);
-                        #[cfg(target_arch = "avr")]
-                        ufmt::uwriteln!(self.device.serial(), "{:?}\r", frame).unwrap();
-
-                        self.encoder.send_frame(frame);
-                        self.to_be_sent = FrameData::None;
-                    }
-                }
-            }
-
             if self.encoder.needs_data() {
                 self.encoder.send_noop();
             }
@@ -123,6 +107,31 @@ impl<D: Device> Connection<D> {
         }
 
         self.counter = self.counter.wrapping_add(1);
+    }
+
+    fn waiting_for_connection(&mut self) {
+        if self.counter % 16 == 0 {
+            if self.sync_requests >= 10 {
+                self.encoder.send_sync_res();
+            } else {
+                self.encoder.send_sync_req()
+            }
+        }
+    }
+
+    fn sending(&mut self) {
+        if self.encoder.needs_data() {
+            if let FrameData::Full(data) | FrameData::Last(data, _) = self.to_be_sent {
+                if let Some(frame) = self.sent.try_insert(|index| Frame::new(index, data)) {
+                    dbg!(frame);
+                    #[cfg(target_arch = "avr")]
+                    ufmt::uwriteln!(self.device.serial(), "{:?}\r", frame).unwrap();
+
+                    self.encoder.send_frame(frame);
+                    self.to_be_sent = FrameData::None;
+                }
+            }
+        }
     }
 
     fn state_transition(&mut self, next: State) {
