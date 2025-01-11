@@ -166,32 +166,37 @@ impl Decoder {
             };
             self.data.shrink_front(width);
 
-            let maybe_command = match code {
-                code @ (EscapeCode::Noop
-                | EscapeCode::SyncReq
-                | EscapeCode::SyncRes
-                | EscapeCode::Finished) => {
+            let mut decode_with_number = || {
+                (self.data.len() >= (8 + 8)).then(|| {
                     self.data.shrink_front(8);
-                    match code {
-                        EscapeCode::SyncReq => Some(Command::SyncReq),
-                        EscapeCode::SyncRes => Some(Command::SyncRes),
-                        EscapeCode::Finished => Some(Command::Finished),
-                        EscapeCode::Noop => None,
-                        _ => unreachable!(),
-                    }
+                    self.data.pop_front::<1>(8).unwrap().bytes()[0]
+                })
+            };
+
+            let maybe_command = match code {
+                EscapeCode::SyncReq => {
+                    self.data.shrink_front(8);
+                    Some(Command::SyncReq)
                 }
+                EscapeCode::SyncRes => {
+                    self.data.shrink_front(8);
+                    Some(Command::SyncRes)
+                }
+                EscapeCode::Noop => {
+                    self.data.shrink_front(8);
+                    None
+                }
+
                 EscapeCode::StartOfFrame => self
                     .data
                     .pop_front::<FRAME_LEN>(FRAME_LEN * 8)
                     .map(|bits| Command::Frame(Frame::decode(bits.bytes()))),
-                EscapeCode::Ack => self
-                    .data
-                    .pop_front::<1>(8)
-                    .map(|index| Command::Ack(index.bytes()[0])),
-                EscapeCode::Nack => self
-                    .data
-                    .pop_front::<1>(8)
-                    .map(|index| Command::Nack(index.bytes()[0])),
+
+                EscapeCode::Ack => decode_with_number().map(|index| Command::Ack(index)),
+                EscapeCode::Nack => decode_with_number().map(|index| Command::Nack(index)),
+                EscapeCode::Finished => {
+                    decode_with_number().map(|len| Command::Finished /* (len) */)
+                }
             };
 
             if let Some(command) = maybe_command {

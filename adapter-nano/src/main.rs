@@ -12,7 +12,7 @@ use arduino_hal::{
     },
     Usart,
 };
-use common::{self, BitIter, BitVec, Connection, Device, FRAME_DATA_LEN};
+use common::{self, BitIter, BitVec, Connection, Device, FrameData, FRAME_DATA_LEN};
 use ufmt::uwriteln;
 
 struct ArduinoDevice {
@@ -102,11 +102,11 @@ impl MirrorConnection {
                     .copy_from_slice(&self.received[FRAME_DATA_LEN..self.len]);
                 self.received = new;
 
-                data
+                FrameData::Full(data)
             });
         }
 
-        if let Some(data) = self.connection.receive() {
+        if let FrameData::Full(data) | FrameData::Last(data, _) = self.connection.receive() {
             self.received[self.len..self.len + FRAME_DATA_LEN].copy_from_slice(&data);
             self.len += FRAME_DATA_LEN;
         }

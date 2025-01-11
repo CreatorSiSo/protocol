@@ -1,6 +1,6 @@
 use crate::{
     transport::{Command, Decoder},
-    Device, Encoder, Frame, IndexMap, FRAME_DATA_LEN,
+    Device, Encoder, Frame, FrameData, IndexMap, FRAME_DATA_LEN,
 };
 
 #[cfg(target_arch = "avr")]
@@ -23,8 +23,8 @@ pub struct Connection<D: Device> {
     state: State,
     encoder: Encoder,
     decoder: Decoder,
-    to_be_sent: Option<[u8; FRAME_DATA_LEN]>,
-    just_received: Option<[u8; FRAME_DATA_LEN]>,
+    to_be_sent: FrameData,
+    just_received: FrameData,
     sent: IndexMap<Frame>,
     received: IndexMap<Frame>,
 }
@@ -38,20 +38,20 @@ impl<D: Device> Connection<D> {
             state: State::WaitingForConnection,
             encoder: Encoder::new(),
             decoder: Decoder::new(),
-            to_be_sent: None,
-            just_received: None,
+            to_be_sent: FrameData::None,
+            just_received: FrameData::None,
             sent: IndexMap::new(Frame::empty_invalid()),
             received: IndexMap::new(Frame::empty_invalid()),
         }
     }
 
-    pub fn send(&mut self, mut f: impl FnMut() -> [u8; FRAME_DATA_LEN]) {
-        if self.to_be_sent.is_none() {
-            self.to_be_sent = Some(f());
+    pub fn send(&mut self, mut f: impl FnMut() -> FrameData) {
+        if self.to_be_sent == FrameData::None {
+            self.to_be_sent = f();
         }
     }
 
-    pub fn receive(&mut self) -> Option<[u8; FRAME_DATA_LEN]> {
+    pub fn receive(&mut self) -> FrameData {
         self.just_received.take()
     }
 
@@ -89,8 +89,6 @@ impl<D: Device> Connection<D> {
 
         match command {
             Command::SyncReq => {
-                // #[cfg(target_arch = "avr")]
-                // ufmt::uwriteln!(self.device.serial(), "Sync requested").unwrap();
                 self.sync_requests += 1;
             }
             Command::SyncRes => {
@@ -98,10 +96,10 @@ impl<D: Device> Connection<D> {
             }
 
             Command::Frame(frame) if frame.is_valid() => {
-                // self.received
-                //     .insert_at(frame.index, frame)
-                //     .expect("Entry already taken");
-                // self.encoder.send_ack(frame.index);
+                self.received
+                    .insert_at(frame.index, frame)
+                    .expect("Entry already taken");
+                self.encoder.send_ack(frame.index);
             }
             Command::Frame(frame) => {
                 // self.encoder.send_nack(frame.index);

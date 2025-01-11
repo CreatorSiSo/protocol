@@ -93,7 +93,7 @@ impl Frame {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub enum FrameData {
     Full([u8; FRAME_DATA_LEN]),
     Last([u8; FRAME_DATA_LEN], u8),
