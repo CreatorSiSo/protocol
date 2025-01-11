@@ -16,9 +16,6 @@ pub use bititer::BitIter;
 mod bitvec;
 pub use bitvec::BitVec;
 
-mod indexmap;
-pub use indexmap::IndexMap;
-
 mod connection;
 pub use connection::Connection;
 use ufmt::uwrite;

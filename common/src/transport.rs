@@ -192,8 +192,14 @@ impl Decoder {
                     .pop_front::<FRAME_LEN>(FRAME_LEN * 8)
                     .map(|bits| Command::Frame(Frame::decode(bits.bytes()))),
 
-                EscapeCode::Ack => decode_with_number().map(|index| Command::Ack(index)),
-                EscapeCode::Nack => decode_with_number().map(|index| Command::Nack(index)),
+                EscapeCode::Ack => {
+                    self.data.shrink_front(8);
+                    Some(Command::Ack)
+                }
+                EscapeCode::Nack => {
+                    self.data.shrink_front(8);
+                    Some(Command::Nack)
+                }
                 EscapeCode::Finished => {
                     decode_with_number().map(|len| Command::Finished /* (len) */)
                 }
@@ -270,47 +276,13 @@ fn decode() {
     );
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, ufmt::derive::uDebug, PartialEq, Eq)]
 pub enum Command {
     SyncReq,
     SyncRes,
     Frame(Frame),
-    Ack(u8),
-    Nack(u8),
+    Ack,
+    Nack,
     Finished,
     None,
-}
-
-impl ufmt::uDebug for Command {
-    fn fmt<W>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error>
-    where
-        W: ufmt::uWrite + ?Sized,
-    {
-        match self {
-            Self::SyncReq => ufmt::uwrite!(f, "SyncReq"),
-            Self::SyncRes => ufmt::uwrite!(f, "SyncRes"),
-            Self::Frame(arg0) => f
-                .debug_tuple("Frame")? /* .field(arg0)? */
-                .finish(),
-            Self::Ack(arg0) => f.debug_tuple("Ack")?.field(arg0)?.finish(),
-            Self::Nack(arg0) => f.debug_tuple("Nack")?.field(arg0)?.finish(),
-            Self::Finished => ufmt::uwrite!(f, "Finished"),
-            Self::None => ufmt::uwrite!(f, "None"),
-        }
-    }
-}
-
-#[cfg(not(target_arch = "avr"))]
-impl core::fmt::Debug for Command {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::SyncReq => write!(f, "SyncReq"),
-            Self::SyncRes => write!(f, "SyncRes"),
-            Self::Frame(arg0) => f.debug_tuple("Frame").field(arg0).finish(),
-            Self::Ack(arg0) => f.debug_tuple("Ack").field(arg0).finish(),
-            Self::Nack(arg0) => f.debug_tuple("Nack").field(arg0).finish(),
-            Self::Finished => write!(f, "Finished"),
-            Self::None => write!(f, "None"),
-        }
-    }
 }

@@ -1,6 +1,6 @@
 use crate::{
     transport::{Command, Decoder},
-    Device, Encoder, Frame, FrameData, IndexMap, FRAME_DATA_LEN,
+    Device, Encoder, Frame, FrameData,
 };
 
 #[cfg(target_arch = "avr")]
@@ -25,8 +25,8 @@ pub struct Connection<D: Device> {
     decoder: Decoder,
     to_be_sent: FrameData,
     just_received: FrameData,
-    sent: IndexMap<Frame>,
-    received: IndexMap<Frame>,
+    sent: Frame,
+    received: Frame,
 }
 
 impl<D: Device> Connection<D> {
@@ -40,8 +40,8 @@ impl<D: Device> Connection<D> {
             decoder: Decoder::new(),
             to_be_sent: FrameData::None,
             just_received: FrameData::None,
-            sent: IndexMap::new(Frame::empty_invalid()),
-            received: IndexMap::new(Frame::empty_invalid()),
+            sent: Frame::empty_invalid(),
+            received: Frame::empty_invalid(),
         }
     }
 
@@ -86,19 +86,17 @@ impl<D: Device> Connection<D> {
             }
 
             Command::Frame(frame) if frame.is_valid() => {
-                self.received
-                    .insert_at(frame.index, frame)
-                    .expect("Entry already taken");
+                self.received = frame;
                 self.encoder.send_ack(frame.index);
             }
             Command::Frame(frame) => {
                 // self.encoder.send_nack(frame.index);
             }
 
-            Command::Ack(index) => {
+            Command::Ack => {
                 // self.received.remove(index)
             }
-            Command::Nack(index) => {
+            Command::Nack => {
                 // self.encoder.send_frame(self.received.get(index).unwrap())
             }
 
@@ -122,14 +120,14 @@ impl<D: Device> Connection<D> {
     fn sending(&mut self) {
         if self.encoder.needs_data() {
             if let FrameData::Full(data) | FrameData::Last(data, _) = self.to_be_sent {
-                if let Some(frame) = self.sent.try_insert(|index| Frame::new(index, data)) {
-                    dbg!(frame);
-                    #[cfg(target_arch = "avr")]
-                    ufmt::uwriteln!(self.device.serial(), "{:?}\r", frame).unwrap();
+                let frame = Frame::new(0, data);
+                self.sent = frame;
+                dbg!(frame);
+                #[cfg(target_arch = "avr")]
+                ufmt::uwriteln!(self.device.serial(), "{:?}\r", frame).unwrap();
 
-                    self.encoder.send_frame(frame);
-                    self.to_be_sent = FrameData::None;
-                }
+                self.encoder.send_frame(&frame);
+                self.to_be_sent = FrameData::None;
             }
         }
     }
