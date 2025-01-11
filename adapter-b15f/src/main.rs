@@ -1,5 +1,5 @@
 use b15f::{B15f, B15fDriver};
-use common::{BitVec, Connection, Device, FRAME_DATA_LEN, FrameData};
+use common::{BitVec, Connection, Device, FRAME_DATA_LEN, Frame};
 use std::{
     io::{ErrorKind, Read, Write, stdin, stdout},
     thread,
@@ -41,20 +41,20 @@ fn main() -> Result<(), &'static str> {
         let now = Instant::now();
         connection.poll();
 
-        if let FrameData::Full(data) | FrameData::Last(data, _) = connection.receive() {
-            stdout.write_all(&data).unwrap();
+        if let Some(frame) = connection.receive() {
+            stdout.write_all(&frame.data[..frame.len as usize]).unwrap();
         }
         connection.send(|| {
             let mut data = [0; FRAME_DATA_LEN];
             match stdin.read_exact(&mut data).map_err(|err| err.kind()) {
-                Result::Ok(..) => FrameData::Full(data),
+                Result::Ok(..) => Some(Frame::new(FRAME_DATA_LEN as u8, data)),
                 Result::Err(ErrorKind::UnexpectedEof) => {
                     if reading {
                         let len = stdin.read(&mut data).unwrap();
                         reading = false;
-                        FrameData::Last(data, len as u8)
+                        Some(Frame::new(len as u8, data))
                     } else {
-                        FrameData::None
+                        None
                     }
                 }
                 Result::Err(kind) => panic!("{}", kind),

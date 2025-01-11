@@ -12,8 +12,7 @@ use arduino_hal::{
     },
     Usart,
 };
-use common::{self, BitIter, BitVec, Connection, Device, FrameData, FRAME_DATA_LEN};
-use ufmt::uwriteln;
+use common::{self, BitIter, BitVec, Connection, Device, Frame, FRAME_DATA_LEN};
 
 struct ArduinoDevice {
     serial: Usart<USART0, Pin<Input, PD0>, Pin<Output, PD1>>,
@@ -92,23 +91,25 @@ impl MirrorConnection {
     }
 
     fn poll(&mut self) {
-        if self.len > 0 {
-            self.connection.send(|| {
-                let mut data = [0; FRAME_DATA_LEN];
-                data.copy_from_slice(&self.received[..FRAME_DATA_LEN]);
+        self.connection.send(|| {
+            if self.len == 0 {
+                return None;
+            }
 
-                let mut new = [0; RECEIVED_LEN];
-                new[..self.len - FRAME_DATA_LEN]
-                    .copy_from_slice(&self.received[FRAME_DATA_LEN..self.len]);
-                self.received = new;
+            let mut data = [0; FRAME_DATA_LEN];
+            data.copy_from_slice(&self.received[..FRAME_DATA_LEN]);
 
-                FrameData::Full(data)
-            });
-        }
+            let mut new = [0; RECEIVED_LEN];
+            new[..self.len - FRAME_DATA_LEN]
+                .copy_from_slice(&self.received[FRAME_DATA_LEN..self.len]);
+            self.received = new;
 
-        if let FrameData::Full(data) | FrameData::Last(data, _) = self.connection.receive() {
-            self.received[self.len..self.len + FRAME_DATA_LEN].copy_from_slice(&data);
-            self.len += FRAME_DATA_LEN;
+            Some(Frame::new(self.len as u8, data))
+        });
+
+        if let Some(frame) = self.connection.receive() {
+            self.received[self.len..self.len + frame.len as usize].copy_from_slice(&frame.data);
+            self.len += frame.len as usize;
         }
 
         self.connection.poll();

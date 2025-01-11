@@ -23,24 +23,27 @@ use ufmt::uwrite;
 const CHECKSUM_LEN: usize = 0;
 pub const FRAME_DATA_LEN: usize = 64;
 pub const FRAME_LEN: usize = /* Escape code */
-    8  + FRAME_DATA_LEN + CHECKSUM_LEN + /* Noop */  1;
+    1 + /* Len */ 1 + FRAME_DATA_LEN + CHECKSUM_LEN + /* Noop */  1;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Frame {
-    data: [u8; FRAME_DATA_LEN],
+    pub len: u8,
+    pub data: [u8; FRAME_DATA_LEN],
     checksum: [u8; CHECKSUM_LEN],
 }
 
 impl Frame {
     pub fn empty_invalid() -> Self {
         Self {
+            len: 0,
             data: [0; FRAME_DATA_LEN],
             checksum: [0; CHECKSUM_LEN],
         }
     }
 
-    pub fn new(data: [u8; FRAME_DATA_LEN]) -> Self {
+    pub fn new(len: u8, data: [u8; FRAME_DATA_LEN]) -> Self {
         Self {
+            len,
             data,
             checksum: Self::checksum(&data),
         }
@@ -56,8 +59,9 @@ impl Frame {
     pub fn encode(&self) -> [u8; FRAME_LEN] {
         let mut bytes = [0; FRAME_LEN];
 
-        bytes[0] = EscapeCode::StartOfFrame as u8;
-        bytes[1..1 + FRAME_DATA_LEN].copy_from_slice(&self.data);
+        bytes[0] = self.len;
+        bytes[1] = EscapeCode::StartOfFrame as u8;
+        bytes[2..2 + FRAME_DATA_LEN].copy_from_slice(&self.data);
         // bytes[2 + FRAME_DATA_LEN..].copy_from_slice(&self.checksum);
         bytes[FRAME_LEN - 1] = EscapeCode::Noop as u8;
 
@@ -66,11 +70,12 @@ impl Frame {
 
     pub fn decode(bytes: &[u8]) -> Self {
         let mut frame = Self {
+            len: bytes[1],
             data: [0; FRAME_DATA_LEN],
             checksum: [0; CHECKSUM_LEN],
         };
 
-        frame.data.copy_from_slice(&bytes[1..1 + FRAME_DATA_LEN]);
+        frame.data.copy_from_slice(&bytes[2..2 + FRAME_DATA_LEN]);
         // frame.checksum.copy_from_slice(&bytes[2 + FRAME_DATA_LEN..]);
 
         frame
@@ -96,19 +101,5 @@ impl ufmt::uDebug for Frame {
             uwrite!(f, "{:x} ", byte)?;
         }
         uwrite!(f, "]")
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub enum FrameData {
-    Full([u8; FRAME_DATA_LEN]),
-    Last([u8; FRAME_DATA_LEN], u8),
-    #[default]
-    None,
-}
-
-impl FrameData {
-    pub fn take(&mut self) -> Self {
-        core::mem::take(self)
     }
 }

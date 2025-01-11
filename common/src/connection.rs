@@ -1,6 +1,6 @@
 use crate::{
     transport::{Command, Decoder},
-    Device, Encoder, Frame, FrameData,
+    Device, Encoder, Frame,
 };
 
 #[cfg(target_arch = "avr")]
@@ -23,10 +23,9 @@ pub struct Connection<D: Device> {
     state: State,
     encoder: Encoder,
     decoder: Decoder,
-    to_be_sent: FrameData,
-    just_received: FrameData,
+    next: Option<Frame>,
+    received: Option<Frame>,
     sent: Frame,
-    received: Frame,
 }
 
 impl<D: Device> Connection<D> {
@@ -38,21 +37,20 @@ impl<D: Device> Connection<D> {
             state: State::WaitingForConnection,
             encoder: Encoder::new(),
             decoder: Decoder::new(),
-            to_be_sent: FrameData::None,
-            just_received: FrameData::None,
+            next: None,
+            received: None,
             sent: Frame::empty_invalid(),
-            received: Frame::empty_invalid(),
         }
     }
 
-    pub fn send(&mut self, mut f: impl FnMut() -> FrameData) {
-        if self.to_be_sent == FrameData::None {
-            self.to_be_sent = f();
+    pub fn send(&mut self, mut f: impl FnMut() -> Option<Frame>) {
+        if self.next.is_none() {
+            self.next = f();
         }
     }
 
-    pub fn receive(&mut self) -> FrameData {
-        self.just_received.take()
+    pub fn receive(&mut self) -> Option<Frame> {
+        self.received.take()
     }
 
     pub fn poll(&mut self) {
@@ -86,7 +84,7 @@ impl<D: Device> Connection<D> {
             }
 
             Command::Frame(frame) if frame.is_valid() => {
-                self.received = frame;
+                self.received = Some(frame);
                 self.encoder.send_ack();
             }
             Command::Frame(frame) => {
@@ -119,15 +117,14 @@ impl<D: Device> Connection<D> {
 
     fn sending(&mut self) {
         if self.encoder.needs_data() {
-            if let FrameData::Full(data) | FrameData::Last(data, _) = self.to_be_sent {
-                let frame = Frame::new(data);
+            if let Some(frame) = self.next {
                 self.sent = frame;
                 dbg!(frame);
                 #[cfg(target_arch = "avr")]
                 ufmt::uwriteln!(self.device.serial(), "{:?}\r", frame).unwrap();
 
                 self.encoder.send_frame(&frame);
-                self.to_be_sent = FrameData::None;
+                self.next = None;
             }
         }
     }
