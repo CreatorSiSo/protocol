@@ -10,10 +10,10 @@ use arduino_hal::{
         mode::{Floating, Input, Output},
         Pin,
     },
-    prelude::_unwrap_infallible_UnwrapInfallible,
     Usart,
 };
-use common::{self, BitIter, BitVec, Connection, Device, MirrorConnection};
+use common::{self, BitIter, BitVec, Connection, Device, FRAME_DATA_LEN};
+use ufmt::uwriteln;
 
 struct ArduinoDevice {
     serial: Usart<USART0, Pin<Input, PD0>, Pin<Output, PD1>>,
@@ -59,17 +59,60 @@ impl Device for ArduinoDevice {
         for pin in 6..=9 {
             result.push_back(&self.get(pin));
         }
-        for bit in result.iter() {
-            ufmt::uwrite!(self.serial, "{}, ", if bit { 1 } else { 0 }).unwrap_infallible();
-        }
-        ufmt::uwriteln!(self.serial, "\r").unwrap_infallible();
+        // for bit in result.iter() {
+        //     ufmt::uwrite!(self.serial, "{}, ", if bit { 1 } else { 0 }).unwrap_infallible();
+        // }
+        // ufmt::uwriteln!(self.serial, "\r").unwrap_infallible();
         result
     }
 
     fn write(&mut self, data: BitVec<1>) {
+        // uwriteln!(&mut self.serial, "{}", data.get(0).unwrap()).unwrap();
         for (value, pin) in data.iter().zip(2..=5) {
             self.set(pin, value);
         }
+    }
+    fn serial(&mut self) -> &mut Usart<USART0, Pin<Input, PD0>, Pin<Output, PD1>> {
+        &mut self.serial
+    }
+}
+
+const RECEIVED_LEN: usize = FRAME_DATA_LEN * 2;
+
+struct MirrorConnection {
+    received: [u8; RECEIVED_LEN],
+    len: usize,
+    connection: Connection<ArduinoDevice>,
+}
+
+impl MirrorConnection {
+    fn new(device: ArduinoDevice) -> Self {
+        Self {
+            received: [0; RECEIVED_LEN],
+            len: 0,
+            connection: Connection::new(device, false),
+        }
+    }
+
+    fn poll(&mut self) {
+        if self.len > 0 {
+            let mut data = [0; FRAME_DATA_LEN];
+            data.copy_from_slice(&self.received[..FRAME_DATA_LEN]);
+
+            if self.connection.send(data) {
+                let mut new = [0; RECEIVED_LEN];
+                new[..self.len - FRAME_DATA_LEN]
+                    .copy_from_slice(&self.received[FRAME_DATA_LEN..self.len]);
+                self.received = new;
+            }
+        }
+
+        if let Some(data) = self.connection.receive() {
+            self.received[self.len..self.len + FRAME_DATA_LEN].copy_from_slice(&data);
+            self.len += FRAME_DATA_LEN;
+        }
+
+        self.connection.poll();
     }
 }
 
@@ -90,9 +133,10 @@ fn main() -> ! {
     };
 
     let mut connection = MirrorConnection::new(device);
-
+    let mut led = pins.d13.into_output();
     loop {
         connection.poll();
-        arduino_hal::delay_ms(100);
+        arduino_hal::delay_ms(40);
+        led.toggle();
     }
 }

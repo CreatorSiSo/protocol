@@ -4,24 +4,21 @@ use crate::{bititer::Byte, BitVec};
 #[repr(u8)]
 pub enum EscapeCode {
     // SNC
-    Sync = 0xf1,
+    Sync = 0xf0,
     /// SOF
-    StartOfFrame = 0x12,
-    /// EOF
-    EndOfFrame = 0x23,
+    StartOfFrame = 0x33,
     /// ACK
-    Ack = 0x34,
+    Ack = 0x44,
     /// NCK
-    Nack = 0x45,
+    Nack = 0x55,
     // FS
-    FinishedSending = 0x67,
+    FinishedSending = 0x66,
 }
 
 impl EscapeCode {
-    const VALUES: [(EscapeCode, u8); 6] = [
+    const VALUES: [(EscapeCode, u8); 5] = [
         (Self::Sync, Self::Sync as u8),
         (Self::StartOfFrame, Self::StartOfFrame as u8),
-        (Self::EndOfFrame, Self::EndOfFrame as u8),
         (Self::Ack, Self::Ack as u8),
         (Self::Nack, Self::Nack as u8),
         (Self::FinishedSending, Self::FinishedSending as u8),

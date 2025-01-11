@@ -66,6 +66,10 @@ impl Encoder {
         self.send_bytes([EscapeCode::FinishedSending as u8])
     }
 
+    pub fn clear(&mut self) {
+        self.data.clear();
+    }
+
     fn send_bytes<const N: usize>(&mut self, bytes: [u8; N]) {
         let bitvec = BitVec::from_bytes(bytes, bytes.len() * 8);
         if self.data.push_back(&bitvec) {
@@ -129,7 +133,6 @@ impl Decoder {
     // Tries to read data and decode from the cable
     pub fn poll(&mut self, device: &mut impl Device) -> Command {
         let mut next = device.read();
-        dbg!(next);
         if next.get(0).unwrap() == self.last.get(0).unwrap() {
             // Clock has not changed since last read
             return Command::None;
@@ -153,7 +156,6 @@ impl Decoder {
                     .data
                     .pop_front::<FRAME_LEN>(FRAME_LEN * 8)
                     .map(|bits| Command::Frame(Frame::decode(bits.bytes()))),
-                EscapeCode::EndOfFrame => unreachable!(),
                 EscapeCode::Ack => self
                     .data
                     .pop_front::<1>(8)
@@ -246,11 +248,29 @@ pub enum Command {
     None,
 }
 
+impl ufmt::uDebug for Command {
+    fn fmt<W>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error>
+    where
+        W: ufmt::uWrite + ?Sized,
+    {
+        match self {
+            Self::Sync => ufmt::uwrite!(f, "Sync"),
+            Self::Frame(arg0) => f
+                .debug_tuple("Frame")? /* .field(arg0)? */
+                .finish(),
+            Self::Ack(arg0) => f.debug_tuple("Ack")?.field(arg0)?.finish(),
+            Self::Nack(arg0) => f.debug_tuple("Nack")?.field(arg0)?.finish(),
+            Self::Finished => ufmt::uwrite!(f, "Finished"),
+            Self::None => ufmt::uwrite!(f, "None"),
+        }
+    }
+}
+
 #[cfg(not(target_arch = "avr"))]
 impl core::fmt::Debug for Command {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Sync => write!(f, "Sync"),
+            Self::Sync => write!(f, "SyncReq"),
             Self::Frame(arg0) => f.debug_tuple("Frame").field(arg0).finish(),
             Self::Ack(arg0) => f.debug_tuple("Ack").field(arg0).finish(),
             Self::Nack(arg0) => f.debug_tuple("Nack").field(arg0).finish(),

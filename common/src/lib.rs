@@ -20,11 +20,12 @@ mod indexmap;
 pub use indexmap::IndexMap;
 
 mod connection;
-pub use connection::{Connection, MirrorConnection};
+pub use connection::Connection;
 
 const CHECKSUM_LEN: usize = 0;
-const FRAME_DATA_LEN: usize = 64;
-const FRAME_LEN: usize = /* Escape code */ 8 + /* Index */ 8 + FRAME_DATA_LEN + CHECKSUM_LEN;
+pub const FRAME_DATA_LEN: usize = 64;
+pub const FRAME_LEN: usize = /* Escape code */
+    8 + /* Index */ 8 + FRAME_DATA_LEN + CHECKSUM_LEN;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Frame {

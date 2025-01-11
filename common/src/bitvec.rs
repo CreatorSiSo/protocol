@@ -122,20 +122,35 @@ impl<const C: usize> BitVec<C> {
         self.clear_remaining_bits();
     }
 
-    pub fn find<const O: usize>(&self, other: &BitVec<O>) -> Option<usize> {
-        let mut clone = self.clone();
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.clear_remaining_bits();
+    }
 
-        for i in 0..self.len {
-            if clone.len < other.len {
-                return None;
-            }
-            if &clone.bytes[..other.bytes.len()] == other.bytes {
+    pub fn find<const O: usize>(&self, other: &BitVec<O>) -> Option<usize> {
+        if other.len > self.len {
+            return None;
+        }
+
+        // Number of bits to check
+        let diff = self.len - other.len;
+
+        for i in 0..=diff {
+            if self.matches_at(other, i) {
                 return Some(i);
             }
-            clone.pop_front::<1>(1);
         }
 
         None
+    }
+
+    fn matches_at<const O: usize>(&self, other: &BitVec<O>, offset: usize) -> bool {
+        for bit_index in 0..other.len {
+            if self.get(offset + bit_index) != other.get(bit_index) {
+                return false;
+            }
+        }
+        true
     }
 
     pub fn get(&self, index: usize) -> Option<bool> {
@@ -306,6 +321,24 @@ impl<const C: usize> Display for BitVec<C> {
             write!(f, ", {bit}")?;
         }
         write!(f, "]")
+    }
+}
+
+impl<const C: usize> ufmt::uDisplay for BitVec<C> {
+    fn fmt<W>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error>
+    where
+        W: ufmt::uWrite + ?Sized,
+    {
+        let mut bits = self.iter().map(|bit| if bit { 1 } else { 0 });
+
+        ufmt::uwrite!(f, "{}", "BitVec<{C}>[")?;
+        if let Some(bit) = bits.next() {
+            ufmt::uwrite!(f, "{}", bit)?;
+        }
+        for bit in bits {
+            ufmt::uwrite!(f, ", {}", bit)?;
+        }
+        ufmt::uwrite!(f, "]")
     }
 }
 

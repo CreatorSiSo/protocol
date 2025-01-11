@@ -1,33 +1,44 @@
 use core::fmt::Debug;
 
+const LEN: usize = 2;
+const MAX_INDEX: u8 = LEN as u8 - 1;
+
 pub struct IndexMap<T: Copy> {
-    data: [T; 256],
-    vacant: [bool; 256],
-    age: [u8; 256],
+    data: [T; LEN],
+    vacant: [bool; LEN],
+    age: [u8; LEN],
 }
 
 impl<T: Copy> IndexMap<T> {
     pub fn new(default: T) -> Self {
         Self {
-            data: [default; 256],
-            vacant: [true; 256],
-            age: [0; 256],
+            data: [default; LEN],
+            vacant: [true; LEN],
+            age: [0; LEN],
         }
     }
 
     pub fn try_insert(&mut self, f: impl FnOnce(u8) -> T) -> Option<&T> {
-        if let Some(index) = (0..=255).find(|index| self.vacant[*index as usize]) {
-            self.data[index as usize] = f(index);
-            for (vacant, age) in self.vacant.iter().zip(self.age.iter_mut()) {
-                if !vacant {
-                    *age += 1;
-                }
-            }
-            self.vacant[index as usize] = false;
-            return Some(&self.data[index as usize]);
+        if let Some(index) = (0..=MAX_INDEX).find(|index| self.vacant[*index as usize]) {
+            return self.insert_at(index, f(index));
         }
 
         None
+    }
+
+    pub fn insert_at(&mut self, index: u8, element: T) -> Option<&T> {
+        if !self.vacant[index as usize] {
+            return None;
+        }
+
+        self.data[index as usize] = element;
+        for (vacant, age) in self.vacant.iter().zip(self.age.iter_mut()) {
+            if !vacant {
+                *age += 1;
+            }
+        }
+        self.vacant[index as usize] = false;
+        Some(&self.data[index as usize])
     }
 
     pub fn get(&self, index: u8) -> Option<&T> {
@@ -43,7 +54,7 @@ impl<T: Copy> IndexMap<T> {
         if let Some((_, index)) = self
             .age
             .iter()
-            .zip(0..=255)
+            .zip(0..=MAX_INDEX)
             .filter(|(_, index)| !self.vacant[*index as usize])
             .max()
         {
@@ -91,20 +102,23 @@ impl<T: Copy> Entry<'_, T> {
 #[test]
 fn indexmap_all() {
     let mut indexmap = IndexMap::new(0);
-    for i in 0..256 {
-        indexmap.try_insert(|k| i + k as i32);
+    for i in 0..LEN {
+        indexmap.try_insert(|k| i as u8 + k as u8);
     }
     assert_eq!(
         indexmap.data.to_vec(),
-        (0..256).map(|i| i * 2).collect::<Vec<_>>()
+        (0..LEN).map(|i| i as u8 * 2).collect::<Vec<_>>()
     );
-    assert_eq!(indexmap.age.to_vec(), (0..=255).rev().collect::<Vec<_>>());
-    assert_eq!(indexmap.vacant, [false; 256]);
+    assert_eq!(
+        indexmap.age.to_vec(),
+        (0..=MAX_INDEX).rev().collect::<Vec<_>>()
+    );
+    assert_eq!(indexmap.vacant, [false; LEN]);
 
     while let Some(mut entry) = indexmap.oldest() {
         entry.remove();
     }
 
-    assert_eq!(indexmap.vacant, [true; 256]);
-    assert_eq!(indexmap.age, [0; 256]);
+    assert_eq!(indexmap.vacant, [true; LEN]);
+    assert_eq!(indexmap.age, [0; LEN]);
 }
