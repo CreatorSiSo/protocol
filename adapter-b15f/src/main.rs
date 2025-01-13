@@ -1,7 +1,7 @@
 use b15f::{B15f, B15fDriver};
-use common::{BitVec, Connection, Device, FRAME_DATA_LEN, Frame};
+use common::{BitVec, Connection, Device, Frame, FRAME_DATA_LEN};
 use std::{
-    io::{ErrorKind, Read, Write, stdin, stdout},
+    io::{stdin, stdout, Read, Write},
     thread,
     time::{Duration, Instant},
 };
@@ -30,35 +30,31 @@ impl Device for B15fDevice {
 }
 
 fn main() -> Result<(), &'static str> {
-    let mut reading = true;
     let mut stdin = stdin().lock();
     let mut stdout = stdout().lock();
 
     let device = B15fDevice::new()?;
     let mut connection = Connection::new(device);
+    let mut input = vec![];
+    stdin.read_to_end(&mut input).unwrap();
+    let mut chunks = input.chunks(FRAME_DATA_LEN);
 
     loop {
         let now = Instant::now();
-        connection.poll();
+        if connection.poll() {
+            return Ok(());
+        }
 
         if let Some(frame) = connection.receive() {
             stdout.write_all(&frame.data[..frame.len as usize]).unwrap();
+            stdout.flush().unwrap();
         }
         connection.send(|| {
-            let mut data = [0; FRAME_DATA_LEN];
-            match stdin.read_exact(&mut data).map_err(|err| err.kind()) {
-                Result::Ok(..) => Some(Frame::new(FRAME_DATA_LEN as u8, data)),
-                Result::Err(ErrorKind::UnexpectedEof) => {
-                    if reading {
-                        let len = stdin.read(&mut data).unwrap();
-                        reading = false;
-                        Some(Frame::new(len as u8, data))
-                    } else {
-                        None
-                    }
-                }
-                Result::Err(kind) => panic!("{}", kind),
-            }
+            chunks.next().map(|chunk| {
+                let mut data = [0; FRAME_DATA_LEN];
+                data[..chunk.len()].copy_from_slice(chunk);
+                Frame::new(chunk.len().try_into().unwrap(), data)
+            })
         });
 
         thread::sleep(Duration::from_millis(30).saturating_sub(now.elapsed()));

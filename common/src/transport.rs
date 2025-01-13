@@ -19,7 +19,7 @@ macro_rules! dbg {
 
 // How many bits are sent at once
 const BIT_WIDTH: usize = 3;
-const BUFFER_SIZE: usize = FRAME_LEN * 3;
+const BUFFER_SIZE: usize = FRAME_LEN * 10;
 
 pub struct Encoder {
     clock: bool,
@@ -87,6 +87,7 @@ impl Encoder {
         if self.data.push_back(&bitvec) {
             panic!("encoder full!");
         }
+        // eprintln!("encoder len: {}/{}", self.data.len(), BUFFER_SIZE * 8);
     }
 }
 
@@ -172,13 +173,13 @@ impl Decoder {
                 }
                 EscapeCode::SyncRes => {
                     self.data.shrink_front(8);
+
                     Command::SyncRes
                 }
                 EscapeCode::Noop => {
                     self.data.shrink_front(8);
                     Command::None
                 }
-
                 EscapeCode::StartOfFrame => {
                     if let Some(bits) = self.data.pop_front::<FRAME_LEN>(FRAME_LEN * 8) {
                         Command::Frame(Frame::decode(bits.bytes()))
@@ -186,7 +187,6 @@ impl Decoder {
                         Command::None
                     }
                 }
-
                 EscapeCode::Ack => {
                     self.data.shrink_front(8);
                     Command::Ack
@@ -203,6 +203,10 @@ impl Decoder {
         }
 
         Command::None
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
     }
 }
 

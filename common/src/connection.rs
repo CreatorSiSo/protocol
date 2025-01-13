@@ -19,6 +19,7 @@ macro_rules! dbg {
 pub struct Connection<D: Device> {
     device: D,
     counter: u32,
+    finished_counter: u8,
     sync_requests: u16,
     state: State,
     encoder: Encoder,
@@ -40,6 +41,7 @@ impl<D: Device> Connection<D> {
             next: None,
             received: None,
             sent: None,
+            finished_counter: 0,
         }
     }
 
@@ -53,12 +55,11 @@ impl<D: Device> Connection<D> {
         self.received.take()
     }
 
-    pub fn poll(&mut self) {
+    pub fn poll(&mut self) -> bool {
         match self.state {
             State::WaitingForConnection => self.waiting_for_connection(),
-            State::SendingAndReceiving => self.sending(),
-            State::OnlySending => self.sending(),
-            State::OnlyReceiving => self.sending(),
+            State::SendingAndReceiving | State::OnlySending => self.sending(),
+            State::OnlyReceiving | State::Finished => {}
         }
 
         if self.counter % 3 == 0 {
@@ -77,7 +78,7 @@ impl<D: Device> Connection<D> {
                 self.device.serial().flush();
             }
             #[cfg(not(target_arch = "avr"))]
-            eprintln!("received {:?}\r", command);
+            eprintln!("received {:?}", command);
         }
 
         match command {
@@ -87,7 +88,6 @@ impl<D: Device> Connection<D> {
             Command::SyncRes => {
                 self.state_transition(State::SendingAndReceiving);
             }
-
             Command::Frame(frame) => {
                 if frame.is_valid() {
                     self.received = Some(frame);
@@ -96,7 +96,6 @@ impl<D: Device> Connection<D> {
                     self.encoder.send_nack();
                 }
             }
-
             Command::Ack => {
                 self.sent = None;
             }
@@ -105,17 +104,27 @@ impl<D: Device> Connection<D> {
                     self.encoder.send_frame(&frame);
                 }
             }
-
-            Command::Finished => self.state_transition(State::OnlySending),
+            Command::Finished => {
+                if self.state == State::OnlyReceiving {
+                    self.state_transition(State::Finished);
+                } else {
+                    self.state_transition(State::OnlySending);
+                }
+            }
             Command::None => (),
         }
 
         self.counter = self.counter.wrapping_add(1);
+
+        if self.state == State::Finished {
+            self.finished_counter += 1;
+        }
+        self.state == State::Finished && self.finished_counter > 10
     }
 
     fn waiting_for_connection(&mut self) {
-        if self.counter % 8 == 0 {
-            if self.sync_requests >= 5 {
+        if self.counter % 8 == 0 && self.encoder.needs_data() {
+            if self.sync_requests >= 10 {
                 self.encoder.send_sync_res();
             } else {
                 self.encoder.send_sync_req()
@@ -129,7 +138,7 @@ impl<D: Device> Connection<D> {
                 self.sent = Some(frame);
 
                 #[cfg(not(target_arch = "avr"))]
-                eprintln!("sending {:?}\r", frame);
+                eprintln!("sending {:?}", frame);
                 #[cfg(target_arch = "avr")]
                 {
                     ufmt::uwriteln!(self.device.serial(), "sending {:?}\r", frame).unwrap();
@@ -137,6 +146,9 @@ impl<D: Device> Connection<D> {
                 }
 
                 self.encoder.send_frame(&frame);
+            } else {
+                self.encoder.send_finished();
+                self.state_transition(State::OnlyReceiving);
             }
         }
     }
@@ -161,15 +173,36 @@ impl<D: Device> Connection<D> {
             eprintln!("{}", str);
         };
 
-        match (self.state, next) {
-            (WaitingForConnection, SendingAndReceiving) => log("=> Established connection"),
-            (SendingAndReceiving, SendingAndReceiving) => log("=> Reestablished connection"),
-            (SendingAndReceiving, OnlySending) => log("=> Done receiving"),
-            (SendingAndReceiving, OnlyReceiving) => log("=> Done sending"),
-            _ => unreachable!(),
-        }
+        let do_transition = match (self.state, next) {
+            (WaitingForConnection, SendingAndReceiving) => {
+                log("=> Established connection");
+                true
+            }
+            (SendingAndReceiving, SendingAndReceiving) => {
+                log("=> Reestablished connection");
+                true
+            }
+            (SendingAndReceiving, OnlySending) => {
+                log("=> Done receiving");
+                true
+            }
+            (SendingAndReceiving, OnlyReceiving) => {
+                log("=> Done sending");
+                true
+            }
+            (_, Finished) => {
+                log("=> Finished");
+                true
+            }
+            _ => {
+                log("=> Invalid transition");
+                false
+            }
+        };
 
-        self.state = next;
+        if do_transition {
+            self.state = next;
+        }
     }
 }
 
@@ -179,4 +212,5 @@ pub enum State {
     SendingAndReceiving,
     OnlySending,
     OnlyReceiving,
+    Finished,
 }
