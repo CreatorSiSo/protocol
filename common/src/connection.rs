@@ -100,8 +100,10 @@ impl<D: Device> Connection<D> {
                 self.sent = None;
             }
             Command::Nack => {
-                if let Some(frame) = self.received {
+                if let Some(frame) = self.sent {
                     self.encoder.send_frame(&frame);
+                } else {
+                    unreachable!("Frame that was just sent does not exist");
                 }
             }
             Command::Finished => {
@@ -125,9 +127,12 @@ impl<D: Device> Connection<D> {
     fn waiting_for_connection(&mut self) {
         if self.counter % 8 == 0 && self.encoder.needs_data() {
             if self.sync_requests >= 10 {
-                self.encoder.send_sync_res();
-            } else {
-                self.encoder.send_sync_req()
+                for _ in 0..5 {
+                    self.encoder.send_sync_res();
+                }
+            }
+            if self.sync_requests <= 15 {
+                self.encoder.send_sync_req();
             }
         }
     }

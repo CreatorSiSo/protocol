@@ -46,7 +46,7 @@ fn main() -> Result<(), &'static str> {
         }
 
         if let Some(frame) = connection.receive() {
-            stdout.write_all(&frame.data[..frame.len as usize]).unwrap();
+            stdout.write_all(&frame.data()).unwrap();
             stdout.flush().unwrap();
         }
         connection.send(|| {
