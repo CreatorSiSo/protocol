@@ -35,9 +35,6 @@ impl Encoder {
     }
 
     pub fn poll(&mut self, device: &mut impl Device) {
-        // #[cfg(target_arch = "avr")]
-        // ufmt::uwriteln!(device.serial(), "encode {}\r", self.data).unwrap();
-
         // Concat clock and data into the nibble to be sent
         let Some(mut data) = self.data.pop_front::<1>(BIT_WIDTH) else {
             return;
@@ -163,43 +160,45 @@ impl Decoder {
             };
             self.data.shrink_front(width);
 
-            let maybe_command = match code {
+            // #[cfg(target_arch = "avr")]
+            // {
+            //     ufmt::uwriteln!(device.serial(), "decode {}\r", self.data).unwrap();
+            //     ufmt::uwriteln!(device.serial(), "  code {:?}\r", code).unwrap();
+            // }
+            return match code {
                 EscapeCode::SyncReq => {
                     self.data.shrink_front(8);
-                    Some(Command::SyncReq)
+                    Command::SyncReq
                 }
                 EscapeCode::SyncRes => {
                     self.data.shrink_front(8);
-                    Some(Command::SyncRes)
+                    Command::SyncRes
                 }
                 EscapeCode::Noop => {
                     self.data.shrink_front(8);
-                    None
+                    Command::None
                 }
 
-                EscapeCode::StartOfFrame => self
-                    .data
-                    .pop_front::<FRAME_LEN>(FRAME_LEN * 8)
-                    .map(|bits| Command::Frame(Frame::decode(bits.bytes()))),
+                EscapeCode::StartOfFrame => {
+                    if let Some(bits) = self.data.pop_front::<FRAME_LEN>(FRAME_LEN * 8) {
+                        Command::Frame(Frame::decode(bits.bytes()))
+                    } else {
+                        Command::None
+                    }
+                }
 
                 EscapeCode::Ack => {
                     self.data.shrink_front(8);
-                    Some(Command::Ack)
+                    Command::Ack
                 }
                 EscapeCode::Nack => {
                     self.data.shrink_front(8);
-                    Some(Command::Nack)
+                    Command::Nack
                 }
                 EscapeCode::Finished => {
                     self.data.shrink_front(8);
-                    Some(Command::Finished)
+                    Command::Finished
                 }
-            };
-
-            return if let Some(command) = maybe_command {
-                command
-            } else {
-                Command::None
             };
         }
 

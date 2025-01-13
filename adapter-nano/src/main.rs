@@ -103,6 +103,7 @@ impl MirrorConnection {
             new[..self.len - FRAME_DATA_LEN]
                 .copy_from_slice(&self.received[FRAME_DATA_LEN..self.len]);
             self.received = new;
+            self.len -= FRAME_DATA_LEN;
 
             Some(Frame::new(self.len as u8, data))
         });

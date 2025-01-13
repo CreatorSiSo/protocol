@@ -329,14 +329,11 @@ impl<const C: usize> ufmt::uDisplay for BitVec<C> {
     where
         W: ufmt::uWrite + ?Sized,
     {
-        let mut bits = self.iter().map(|bit| if bit { 1 } else { 0 });
+        let bits = self.iter().map(|bit| if bit { "1" } else { "0" });
 
         ufmt::uwrite!(f, "{}", "[")?;
-        if let Some(bit) = bits.next() {
-            ufmt::uwrite!(f, "{}", bit)?;
-        }
         for bit in bits {
-            ufmt::uwrite!(f, ", {}", bit)?;
+            ufmt::uwrite!(f, "{}", bit)?;
         }
         ufmt::uwrite!(f, "]")
     }

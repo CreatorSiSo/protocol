@@ -4,17 +4,17 @@ use crate::{bititer::Byte, BitVec};
 #[repr(u8)]
 pub enum EscapeCode {
     // SRQ
-    SyncReq = 0b1111_0001,
+    SyncReq = 0b1110_0001,
     // SRS
-    SyncRes = 0b1000_0011,
+    SyncRes = 0b1000_0110,
     /// SOF
-    StartOfFrame = 0b1000_0101,
+    StartOfFrame = 0b1010_0101,
     /// ACK
-    Ack = 0b1000_1001,
+    Ack = 0b1001_1001,
     /// NCK
-    Nack = 0b1001_0001,
+    Nack = 0b1101_0001,
     // FS
-    Finished = 0b1010_0001,
+    Finished = 0b1011_0001,
     // NOP
     Noop = 0b0000_0000,
 }

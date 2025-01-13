@@ -70,6 +70,16 @@ impl<D: Device> Connection<D> {
 
         let command = self.decoder.poll(&mut self.device);
 
+        if command != Command::None {
+            #[cfg(target_arch = "avr")]
+            {
+                ufmt::uwriteln!(self.device.serial(), "received {:?}\r", command).unwrap();
+                self.device.serial().flush();
+            }
+            #[cfg(not(target_arch = "avr"))]
+            eprintln!("received {:?}\r", command);
+        }
+
         match command {
             Command::SyncReq => {
                 self.sync_requests += 1;
@@ -79,11 +89,6 @@ impl<D: Device> Connection<D> {
             }
 
             Command::Frame(frame) => {
-                #[cfg(target_arch = "avr")]
-                ufmt::uwriteln!(self.device.serial(), "received {:?}\r", frame).unwrap();
-                #[cfg(not(target_arch = "avr"))]
-                eprintln!("received {:?}", frame);
-
                 if frame.is_valid() {
                     self.received = Some(frame);
                     self.encoder.send_ack();
@@ -96,7 +101,9 @@ impl<D: Device> Connection<D> {
                 self.sent = None;
             }
             Command::Nack => {
-                // self.encoder.send_frame(self.received.get(index).unwrap())
+                if let Some(frame) = self.received {
+                    self.encoder.send_frame(&frame);
+                }
             }
 
             Command::Finished => self.state_transition(State::OnlySending),
@@ -120,11 +127,14 @@ impl<D: Device> Connection<D> {
         if self.encoder.needs_data() && self.sent.is_none() {
             if let Some(frame) = self.next.take() {
                 self.sent = Some(frame);
+
                 #[cfg(not(target_arch = "avr"))]
                 eprintln!("sending {:?}\r", frame);
-
                 #[cfg(target_arch = "avr")]
-                ufmt::uwriteln!(self.device.serial(), "sending {:?}\r", frame).unwrap();
+                {
+                    ufmt::uwriteln!(self.device.serial(), "sending {:?}\r", frame).unwrap();
+                    self.device.serial().flush();
+                }
 
                 self.encoder.send_frame(&frame);
             }
@@ -136,10 +146,16 @@ impl<D: Device> Connection<D> {
         #[cfg(not(target_arch = "avr"))]
         eprintln!("{:?}", (self.state, next));
         #[cfg(target_arch = "avr")]
-        ufmt::uwrite!(self.device.serial(), "{:?}, {:?}\r", self.state, next).unwrap();
+        {
+            ufmt::uwrite!(self.device.serial(), "{:?}, {:?}\r", self.state, next).unwrap();
+            self.device.serial().flush();
+        }
 
         #[cfg(target_arch = "avr")]
-        let mut log = |str| ufmt::uwrite!(self.device.serial(), "{}\r", str).unwrap();
+        let mut log = |str| {
+            ufmt::uwrite!(self.device.serial(), "{}\r", str).unwrap();
+            self.device.serial().flush();
+        };
         #[cfg(not(target_arch = "avr"))]
         let log = |str: &'static str| {
             eprintln!("{}", str);
